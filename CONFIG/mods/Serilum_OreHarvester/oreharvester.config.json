@@ -1,0 +1,8 @@
+{
+  "EnableOreHarvester": true,
+  "PlayerMustCrouch": true,
+  "MustHoldPickaxe": true,
+  "DropOresAtFirstBrokenBlock": true,
+  "DecreaseDurabilityPerHarvestedOre": true,
+  "DurabilityPerHarvestedOre": 1.0
+}

@@ -1,0 +1,235 @@
+{
+  "Mods": {
+    "bonddynamics:1HitBirds": {
+      "Enabled": true
+    },
+    "BlackAures:Aures Paintings": {
+      "Enabled": true
+    },
+    "tr7zw:AutoHammer": {
+      "Enabled": true
+    },
+    "intu:Better Repair Kits!": {
+      "Enabled": true
+    },
+    "Buuz135:BetterModlist": {
+      "Enabled": true
+    },
+    "GoodWitchLalya:BiggerOreStacks": {
+      "Enabled": true
+    },
+    "Yernemm:Blahaj": {
+      "Enabled": true
+    },
+    "Bonnibel:Bonnibel - One Log Four Planks": {
+      "Enabled": true
+    },
+    "dev.hytalemodding:Clock HUD": {
+      "Enabled": true
+    },
+    "Darkhax:CobbleGens": {
+      "Enabled": true
+    },
+    "Serilum:CyclePaintings": {
+      "Enabled": true
+    },
+    "DurabilityNotifier:DurabilityNotifier": {
+      "Enabled": true
+    },
+    "BlueDuck:DustrialDecor": {
+      "Enabled": true
+    },
+    "JarHax:EyeSpy": {
+      "Enabled": true
+    },
+    "intu:Hidden Armor!": {
+      "Enabled": true
+    },
+    "Serilum:Hybrid": {
+      "Enabled": true
+    },
+    "tr7zw:HYKEA": {
+      "Enabled": true
+    },
+    "com.hymarkers:HyMarkers": {
+      "Enabled": true
+    },
+    "Resyn:Hytail": {
+      "Enabled": true
+    },
+    "EllieAU:IncreaseCraftingInventoryRadius": {
+      "Enabled": true
+    },
+    "BlameJared:ItemMagnet": {
+      "Enabled": true
+    },
+    "JET:Just Enough Tales (JET)": {
+      "Enabled": true
+    },
+    "StonedTurtle:LightsaberV4": {
+      "Enabled": true
+    },
+    "Buuz135:LuckyMining": {
+      "Enabled": true
+    },
+    "Lumengrid:Lumenia": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Carpets": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Doors": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Furniture": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Lights": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Paintings": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Paths": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Stairs": {
+      "Enabled": true
+    },
+    "SketchMacaw:Macaw\u0027s Hy Windows": {
+      "Enabled": true
+    },
+    "BlameJared:MinersHelmet": {
+      "Enabled": true
+    },
+    "DanielBelmes:Mining Hammer": {
+      "Enabled": true
+    },
+    "CrissCrossSkies:Moon of Equestria": {
+      "Enabled": true
+    },
+    "IBC:Multitools": {
+      "Enabled": true
+    },
+    "ElocinDev:One_Handed_Lanterns": {
+      "Enabled": true
+    },
+    "BlameJared:OreCrusher": {
+      "Enabled": true
+    },
+    "Serilum:OreHarvester": {
+      "Enabled": true
+    },
+    "narwhals:Perfect Parries": {
+      "Enabled": true
+    },
+    "Darkhax:Pixel_Paintings": {
+      "Enabled": true
+    },
+    "BlameJared:QuickCrafting": {
+      "Enabled": true
+    },
+    "steventhorne:Quickstacker": {
+      "Enabled": true
+    },
+    "Joshie:RestoredRuins": {
+      "Enabled": true
+    },
+    "Orca:ReZeroDeath": {
+      "Enabled": true
+    },
+    "Darkhax:ShimmerShrubs": {
+      "Enabled": true
+    },
+    "haskill:SimpleGlassBlock": {
+      "Enabled": true
+    },
+    "BlameJared:SimplyTrash": {
+      "Enabled": true
+    },
+    "Darkhax:Soulstones": {
+      "Enabled": true
+    },
+    "spark:spark": {
+      "Enabled": true
+    },
+    "Buuz135:ThePickaxesPlaceTorches": {
+      "Enabled": true
+    },
+    "BlameJared:ThoriumChests": {
+      "Enabled": true
+    },
+    "BlameJared:ThoriumFurnaces": {
+      "Enabled": true
+    },
+    "Serilum:TreeHarvester": {
+      "Enabled": true
+    },
+    "SketchMacaw:Useful Sticks": {
+      "Enabled": true
+    },
+    "Darkhax:VectorRune": {
+      "Enabled": true
+    },
+    "Violet:Violet\u0027s Furnishings": {
+      "Enabled": true
+    },
+    "Violet:Violet\u0027s Music Players": {
+      "Enabled": true
+    },
+    "Violet:Violet\u0027s Plushies": {
+      "Enabled": true
+    },
+    "Violet:Violet\u0027s Wardrobe": {
+      "Enabled": true
+    },
+    "WanMine:Wan\u0027s Wonder Weapons": {
+      "Enabled": true
+    },
+    "Conczin:Ymmersive Carpentry": {
+      "Enabled": true
+    },
+    "Conczin:Ymmersive Foliage": {
+      "Enabled": true
+    },
+    "Conczin:Ymmersive Masonry": {
+      "Enabled": true
+    },
+    "Conczin:Ymmersive Melodies": {
+      "Enabled": true
+    },
+    "Conczin:Ymmersive Statues": {
+      "Enabled": true
+    },
+    "Refresh Studios:YUNG\u0027s HyDungeons": {
+      "Enabled": true
+    },
+    "alizardguy:Zards_Sick_Glowys": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Bakehouse": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Culinary": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Cultivation": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Neon Blocks": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Orchard": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Simple Bags": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Tavern": {
+      "Enabled": true
+    },
+    "NoCube:[NoCube\u0027s] Undead Warriors": {
+      "Enabled": true
+    }
+  }
+}

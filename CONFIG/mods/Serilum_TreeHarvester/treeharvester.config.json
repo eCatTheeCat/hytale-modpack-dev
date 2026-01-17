@@ -1,0 +1,14 @@
+{
+  "EnableTreeHarvester": true,
+  "PlayerMustCrouch": true,
+  "MustHoldHatchet": true,
+  "AllowBrokenHatchet": true,
+  "FillTreeRootsHole": false,
+  "DropLogsAtFirstBrokenBlock": true,
+  "DropTreeLeaves": false,
+  "AddSaplingDropChanceFromLeaves": true,
+  "SaplingDropChance": 0.05,
+  "PlantSaplingAfterHarvestIfFound": false,
+  "DecreaseDurabilityPerHarvestedLog": true,
+  "DurabilityPerHarvestedLog": 0.1
+}

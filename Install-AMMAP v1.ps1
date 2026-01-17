@@ -1,9 +1,7 @@
 # Download-Mods.ps1
 # Reads URLs from links.txt, opens each in Firefox, waits for a new download to complete, then moves it.
 
-$LinksFile   = Join-Path $PSScriptRoot "modDownloadLinks.txt"
 $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
-$DestDir     = Join-Path $PSScriptRoot "Mods"   # change if you want
 
 $PollMs      = 50
 $TimeoutSec  = 180
@@ -12,6 +10,41 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $script:Abort = $false
+
+function Get-HytaleUserDataDir {
+  $defaultRoot = Join-Path $env:APPDATA "Hytale"
+  if (Test-Path -LiteralPath $defaultRoot) {
+    $root = $defaultRoot
+  } else {
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = "Select your Hytale install folder"
+    $dialog.ShowNewFolderButton = $false
+    $result = $dialog.ShowDialog()
+    if ($result -ne [System.Windows.Forms.DialogResult]::OK -or
+        [string]::IsNullOrWhiteSpace($dialog.SelectedPath)) {
+      return $null
+    }
+    $root = $dialog.SelectedPath
+  }
+
+  if ([IO.Path]::GetFileName($root) -ieq "UserData") {
+    $userData = $root
+  } else {
+    $userData = Join-Path $root "UserData"
+  }
+
+  if (!(Test-Path -LiteralPath $userData)) {
+    New-Item -ItemType Directory -Force -Path $userData | Out-Null
+  }
+
+  return $userData
+}
+
+$UserDataDir = Get-HytaleUserDataDir
+if (-not $UserDataDir) { throw "Hytale install location not provided." }
+
+$LinksFile   = Join-Path $UserDataDir "modDownloadLinks.txt"
+$DestDir     = Join-Path $UserDataDir "Mods"
 
 if (!(Test-Path $LinksFile)) { throw "Missing links file: $LinksFile" }
 New-Item -ItemType Directory -Force -Path $DestDir | Out-Null

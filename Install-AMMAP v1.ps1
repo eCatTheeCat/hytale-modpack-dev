@@ -11,6 +11,63 @@ Add-Type -AssemblyName System.Drawing
 
 $script:Abort = $false
 
+function Split-CommandLine([string]$command) {
+  if ([string]::IsNullOrWhiteSpace($command)) { return $null }
+  $cmd = $command.Trim()
+  if ($cmd.StartsWith('"')) {
+    $end = $cmd.IndexOf('"', 1)
+    if ($end -lt 1) { return $null }
+    $exe = $cmd.Substring(1, $end - 1)
+    $args = $cmd.Substring($end + 1).Trim()
+  } else {
+    $space = $cmd.IndexOf(' ')
+    if ($space -lt 0) {
+      $exe = $cmd
+      $args = ""
+    } else {
+      $exe = $cmd.Substring(0, $space)
+      $args = $cmd.Substring($space + 1).Trim()
+    }
+  }
+  return @{ Exe = $exe; Args = $args }
+}
+
+function Build-BrowserArguments([string]$args, [string]$url) {
+  $quotedUrl = '"' + $url + '"'
+  if ([string]::IsNullOrWhiteSpace($args)) { return $quotedUrl }
+  if ($args -match '%1|%l|%u') {
+    $out = $args -replace '%1', $quotedUrl -replace '%l', $quotedUrl -replace '%u', $quotedUrl
+    return $out.Trim()
+  }
+  return ($args + " " + $quotedUrl).Trim()
+}
+
+function Get-DefaultBrowserInfo {
+  $progId = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice" -ErrorAction SilentlyContinue).ProgId
+  if (-not $progId) { return $null }
+  $cmdKey = "Registry::HKEY_CLASSES_ROOT\$progId\shell\open\command"
+  $cmd = $null
+  try {
+    $cmd = (Get-Item -Path $cmdKey -ErrorAction Stop).GetValue('')
+  } catch {
+    return $null
+  }
+  if (-not $cmd) { return $null }
+  $parsed = Split-CommandLine $cmd
+  if (-not $parsed) { return $null }
+  if ([IO.Path]::GetFileName($parsed.Exe) -ieq "rundll32.exe") { return $null }
+  return $parsed
+}
+
+function Open-UrlInDefaultBrowser([string]$url) {
+  if ($script:BrowserInfo -and (Test-Path -LiteralPath $script:BrowserInfo.Exe)) {
+    $args = Build-BrowserArguments $script:BrowserInfo.Args $url
+    Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $args | Out-Null
+  } else {
+    Start-Process $url | Out-Null
+  }
+}
+
 function Get-HytaleUserDataDir {
   $defaultRoot = Join-Path $env:APPDATA "Hytale"
   if (Test-Path -LiteralPath $defaultRoot) {
@@ -134,6 +191,9 @@ function Close-FirefoxTab {
   }
 }
 
+$script:BrowserInfo = Get-DefaultBrowserInfo
+$script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
+
 $urls = Get-Content -LiteralPath $LinksFile |
   ForEach-Object { $_.Trim() } |
   Where-Object { $_ -and -not $_.StartsWith("#") }
@@ -209,17 +269,23 @@ $form.Add_Shown({
     return
   }
 
+  if ($script:BrowserInfo) {
+    Add-Log ("Default browser: {0}" -f $script:BrowserName)
+  } else {
+    Add-Log "Default browser detection failed; using shell open."
+  }
+
   $completed = 0
   foreach ($url in $urls) {
     if ($script:Abort) { break }
-    Set-Status ("Opening: {0}" -f $url)
-    Add-Log ("Opening: {0}" -f $url)
+    Set-Status ("Opening in {0}: {1}" -f $script:BrowserName, $url)
+    Add-Log ("Opening in {0}: {1}" -f $script:BrowserName, $url)
     Write-Host "`nOpening: $url"
 
     $before = Get-DownloadSnapshot
 
-    # Open URL in Firefox (assumes Firefox is installed and in PATH)
-    Start-Process "firefox.exe" -ArgumentList @("-new-tab", $url) | Out-Null
+    # Open URL in the user's default browser
+    Open-UrlInDefaultBrowser $url
 
     Set-Status "Waiting for download..."
     Add-Log "Waiting for download..."
@@ -259,7 +325,9 @@ $form.Add_Shown({
     Add-Log ("Moved to: {0}" -f $dest)
     Write-Host "Moved to: $dest"
 
-    Close-FirefoxTab
+    if ($script:BrowserName -ieq "firefox") {
+      Close-FirefoxTab
+    }
     Start-Sleep -Milliseconds 250
 
     $completed++

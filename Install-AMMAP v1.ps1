@@ -1,5 +1,5 @@
 # Download-Mods.ps1
-# Reads URLs from links.txt, opens each in Firefox, waits for a new download to complete, then moves it.
+# Reads URLs from modDownloadLinks.txt, opens each in browser, waits for a new download to complete, then moves it.
 
 $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
 
@@ -43,7 +43,7 @@ function Get-HytaleUserDataDir {
 $UserDataDir = Get-HytaleUserDataDir
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
 
-$LinksFile   = Join-Path $UserDataDir "modDownloadLinks.txt"
+$LinksFile   = Join-Path $PSScriptRoot "modDownloadLinks.txt"
 $DestDir     = Join-Path $UserDataDir "Mods"
 
 if (!(Test-Path $LinksFile)) { throw "Missing links file: $LinksFile" }
@@ -52,6 +52,22 @@ New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 function Get-DownloadSnapshot {
   Get-ChildItem -LiteralPath $DownloadDir -File |
     Select-Object FullName, Name, Length, LastWriteTime
+}
+
+function Wait-FileUnlocked([string]$path, [int]$timeoutSec) {
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    if ($script:Abort) { return $false }
+    try {
+      $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+      $fs.Close()
+      return $true
+    } catch {
+      Start-Sleep -Milliseconds $PollMs
+      [System.Windows.Forms.Application]::DoEvents()
+    }
+  }
+  return $false
 }
 
 function Wait-NewDownloadComplete($beforeSnapshot) {
@@ -77,10 +93,10 @@ function Wait-NewDownloadComplete($beforeSnapshot) {
       $hasPart = Test-Path -LiteralPath $partPath
 
       if (-not $hasPart) {
-        # Extra safety: wait until size stabilizes across five polls
+        # Extra safety: wait until size stabilizes across ten polls
         $stable = $true
         $prevSize = $null
-        for ($i = 0; $i -lt 5; $i++) {
+        for ($i = 0; $i -lt 10; $i++) {
           $fi = Get-Item -LiteralPath $f.FullName -ErrorAction SilentlyContinue
           if (-not $fi) { $stable = $false; break }
           if ($i -eq 0) {
@@ -94,7 +110,10 @@ function Wait-NewDownloadComplete($beforeSnapshot) {
           if ($script:Abort) { return $null }
         }
         if ($stable) {
-          return $f.FullName
+          $remaining = [Math]::Max(1, [int][Math]::Ceiling($TimeoutSec - $sw.Elapsed.TotalSeconds))
+          if (Wait-FileUnlocked $f.FullName $remaining) {
+            return $f.FullName
+          }
         }
       }
     }

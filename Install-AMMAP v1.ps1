@@ -23,6 +23,7 @@ $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
 
 $PollMs      = 50
 $TimeoutSec  = 180
+$MinStableAgeMs = 1000
 
 try {
   Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -400,6 +401,7 @@ function Get-NewCompletedDownload($beforeSnapshot) {
   $before = @{}
   foreach ($f in $beforeSnapshot) { $before[$f.FullName] = $true }
   $loggedCandidates = @{}
+  $loggedZero = @{}
 
   $sw = [Diagnostics.Stopwatch]::StartNew()
   while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
@@ -414,7 +416,14 @@ function Get-NewCompletedDownload($beforeSnapshot) {
     # If Firefox is still downloading, it often leaves a *.part file behind.
     # Wait until we see at least one new NON-.part file and no matching .part alongside it.
     foreach ($f in $newFiles) {
-      if ($f.Extension -eq ".part") { continue }
+      if ($f.Extension -in @(".part", ".crdownload", ".tmp", ".partial", ".download")) { continue }
+      if ($f.Length -le 0) {
+        if (-not $loggedZero.ContainsKey($f.FullName)) {
+          Add-Log ("Detected zero-byte file, waiting: {0}" -f $f.FullName)
+          $loggedZero[$f.FullName] = $true
+        }
+        continue
+      }
       if (-not $loggedCandidates.ContainsKey($f.FullName)) {
         Add-Log ("Detected new file: {0}" -f $f.FullName)
         $loggedCandidates[$f.FullName] = $true
@@ -443,6 +452,8 @@ function Get-NewCompletedDownload($beforeSnapshot) {
         }
         if ($stable) {
           Add-Log ("Size stable: {0}" -f $f.FullName)
+          $ageMs = ((Get-Date) - $f.LastWriteTime).TotalMilliseconds
+          if ($ageMs -lt $MinStableAgeMs) { continue }
           $remaining = [Math]::Max(1, [int][Math]::Ceiling($TimeoutSec - $sw.Elapsed.TotalSeconds))
           if (Test-FileUnlocked $f.FullName $remaining) {
             return $f.FullName

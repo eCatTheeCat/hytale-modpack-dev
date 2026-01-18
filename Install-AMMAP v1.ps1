@@ -113,10 +113,24 @@ function Get-DefaultBrowserInfo {
 function Open-UrlInDefaultBrowser([string]$url) {
   if ($script:BrowserInfo -and (Test-Path -LiteralPath $script:BrowserInfo.Exe)) {
     if ($script:BrowserName -ieq "firefox") {
-      Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-window", $url) | Out-Null
+      if (-not $script:BrowserSessionOpened) {
+        Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-window", $url) | Out-Null
+        Add-Log "Opened new Firefox window for downloads."
+      } else {
+        Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-tab", $url) | Out-Null
+        Add-Log "Opened new Firefox tab."
+      }
+      $script:BrowserSessionOpened = $true
     } else {
-      $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $script:BrowserInstanceArgs
+      $prefixArgs = if ($script:BrowserSessionOpened) { $null } else { $script:BrowserInstanceArgs }
+      $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $prefixArgs
       Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $browserLaunchArgs | Out-Null
+      if (-not $script:BrowserSessionOpened) {
+        Add-Log "Opened new browser window for downloads."
+      } else {
+        Add-Log "Opened browser tab (best-effort)."
+      }
+      $script:BrowserSessionOpened = $true
     }
   } else {
     Start-Process $url | Out-Null
@@ -367,29 +381,35 @@ function Get-NewCompletedDownload($beforeSnapshot) {
   return $null
 }
 
-function Close-FirefoxTab {
-  # Best-effort: bring Firefox to front and send Ctrl+W
+function Stop-FirefoxWindow {
+  # Best-effort: bring Firefox to front and send Ctrl+Shift+W (close window)
   try {
     $ws = New-Object -ComObject WScript.Shell
     $null = $ws.AppActivate("Mozilla Firefox")
     Start-Sleep -Milliseconds 150
-    $ws.SendKeys("^w")
+    $ws.SendKeys("^+w")
   } catch {
-    # If this fails, we don't hard-stop; you'll just have extra tabs
+    # If this fails, we don't hard-stop; window may stay open
   }
 }
 
 $script:BrowserInfo = Get-DefaultBrowserInfo
 $script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
 $script:BrowserInstanceArgs = if ($script:BrowserInfo) { Get-BrowserInstanceArgs $script:BrowserInfo.Exe } else { $null }
+$script:BrowserSessionOpened = $false
 if ($script:BrowserInfo) {
   Add-LogBuffer ("Default browser: {0}" -f $script:BrowserName)
   if ($script:BrowserInstanceArgs) {
-    Add-LogBuffer ("Launching in new window/instance: {0}" -f $script:BrowserInstanceArgs)
+    Add-LogBuffer ("Launching in new window: {0}" -f $script:BrowserInstanceArgs)
   } else {
     Add-LogBuffer "No new-window args for this browser; using default launch."
   }
-  Add-LogBuffer "Browser windows will be left open to avoid affecting existing sessions."
+  if ($script:BrowserName -ieq "firefox") {
+    Add-LogBuffer "Will use one Firefox window and open tabs for each download."
+    Add-LogBuffer "Will attempt to close the Firefox download window when finished."
+  } else {
+    Add-LogBuffer "Will use one window when possible; tabs are best-effort."
+  }
 } else {
   Add-LogBuffer "Default browser detection failed; using shell open."
   Add-LogBuffer "Browser windows will be left open to avoid affecting existing sessions."
@@ -407,9 +427,10 @@ $total = $urls.Count
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "AMMAP Installer"
-$form.FormBorderStyle = "FixedToolWindow"
+$form.FormBorderStyle = "SizableToolWindow"
 $form.StartPosition = "Manual"
-$form.Size = New-Object System.Drawing.Size(360, 300)
+$form.Size = New-Object System.Drawing.Size(520, 340)
+$form.MinimumSize = New-Object System.Drawing.Size(420, 260)
 
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen
 if (-not $screen) {
@@ -424,27 +445,46 @@ $x = [int]$wa.Right - [int]$form.Width - $margin
 $y = [int]$wa.Bottom - [int]$form.Height - $margin
 $form.Location = New-Object System.Drawing.Point($x, $y)
 
+$padding = 12
+$gap = 8
+$contentWidth = $form.ClientSize.Width - ($padding * 2)
+
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.AutoSize = $false
-$statusLabel.Size = New-Object System.Drawing.Size(330, 40)
-$statusLabel.Location = New-Object System.Drawing.Point(12, 12)
+$statusLabel.Size = New-Object System.Drawing.Size($contentWidth, 40)
+$statusLabel.Location = New-Object System.Drawing.Point($padding, $padding)
 $statusLabel.Text = "Ready."
+$statusLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Location = New-Object System.Drawing.Point(12, 60)
-$progressBar.Size = New-Object System.Drawing.Size(330, 18)
+$progressY = $statusLabel.Location.Y + $statusLabel.Height + $gap
+$progressBar.Location = New-Object System.Drawing.Point($padding, $progressY)
+$progressBar.Size = New-Object System.Drawing.Size($contentWidth, 18)
 $progressBar.Minimum = 0
 $progressBar.Maximum = [Math]::Max(1, $total)
 $progressBar.Value = 0
 $progressBar.Style = "Continuous"
+$progressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
 $logList = New-Object System.Windows.Forms.ListBox
-$logList.Location = New-Object System.Drawing.Point(12, 72)
-$logList.Size = New-Object System.Drawing.Size(330, 160)
+$logTop = $progressY + $progressBar.Height + $gap
+$buttonSize = New-Object System.Drawing.Size(110, 24)
+$buttonY = $form.ClientSize.Height - $padding - $buttonSize.Height
+$logHeight = $buttonY - $gap - $logTop
+$logList.Location = New-Object System.Drawing.Point($padding, $logTop)
+$logList.Size = New-Object System.Drawing.Size($contentWidth, $logHeight)
 $logList.IntegralHeight = $false
+$logList.HorizontalScrollbar = $true
+$script:MaxLogWidth = 0
+$logList.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
 
 foreach ($entry in $script:LogBuffer) {
   $logList.Items.Add($entry) | Out-Null
+  $entryWidth = [System.Windows.Forms.TextRenderer]::MeasureText($entry, $logList.Font).Width
+  if ($entryWidth -gt $script:MaxLogWidth) {
+    $script:MaxLogWidth = $entryWidth
+    $logList.HorizontalExtent = $script:MaxLogWidth + 12
+  }
 }
 if ($logList.Items.Count -gt 0) {
   $logList.TopIndex = $logList.Items.Count - 1
@@ -453,8 +493,9 @@ $script:LogBuffer.Clear()
 
 $abortButton = New-Object System.Windows.Forms.Button
 $abortButton.Text = "Abort Install"
-$abortButton.Size = New-Object System.Drawing.Size(110, 24)
-$abortButton.Location = New-Object System.Drawing.Point(232, 240)
+$abortButton.Size = $buttonSize
+$abortButton.Location = New-Object System.Drawing.Point($form.ClientSize.Width - $padding - $buttonSize.Width, $buttonY)
+$abortButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
 $abortButton.Add_Click({
   $script:Abort = $true
   $statusLabel.Text = "Abort requested..."
@@ -467,7 +508,13 @@ $form.Controls.AddRange(@($statusLabel, $progressBar, $logList, $abortButton))
 
 function Add-Log([string]$text) {
   $stamp = (Get-Date).ToString("HH:mm:ss")
-  $logList.Items.Add("$stamp $text") | Out-Null
+  $line = "$stamp $text"
+  $logList.Items.Add($line) | Out-Null
+  $textWidth = [System.Windows.Forms.TextRenderer]::MeasureText($line, $logList.Font).Width
+  if ($textWidth -gt $script:MaxLogWidth) {
+    $script:MaxLogWidth = $textWidth
+    $logList.HorizontalExtent = $script:MaxLogWidth + 12
+  }
   $logList.TopIndex = $logList.Items.Count - 1
   [System.Windows.Forms.Application]::DoEvents()
 }
@@ -631,6 +678,10 @@ $form.Add_Shown({
 
   Set-Status "Done."
   Add-Log "Done."
+  if ($script:BrowserName -ieq "firefox" -and $script:BrowserSessionOpened) {
+    Add-Log "Closing Firefox download window..."
+    Stop-FirefoxWindow
+  }
   Write-Host "`nDone."
 })
 

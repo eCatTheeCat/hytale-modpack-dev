@@ -175,10 +175,32 @@ function Get-ModManifestInfo([string]$filePath) {
     }
     $reader = New-Object IO.StreamReader($entry.Open())
     $jsonText = $reader.ReadToEnd()
-    $manifest = $jsonText | ConvertFrom-Json -ErrorAction Stop
+    $main = $null
+    $version = $null
+    try {
+      $manifest = $jsonText | ConvertFrom-Json -ErrorAction Stop
+      if ($manifest.PSObject.Properties.Match('Main').Count -gt 0) {
+        $main = [string]$manifest.Main
+      }
+      if ($manifest.PSObject.Properties.Match('Version').Count -gt 0) {
+        $version = [string]$manifest.Version
+      }
+    } catch {
+      # Fall back to regex parsing below.
+    }
+
+    if (-not $main) {
+      $mainMatch = [regex]::Match($jsonText, '"Main"\s*:\s*"([^"]*)"')
+      if ($mainMatch.Success) { $main = $mainMatch.Groups[1].Value }
+    }
+    if (-not $version) {
+      $versionMatch = [regex]::Match($jsonText, '"Version"\s*:\s*"([^"]*)"')
+      if ($versionMatch.Success) { $version = $versionMatch.Groups[1].Value }
+    }
+
     return @{
-      Name = $manifest.Main
-      Version = $manifest.Version
+      Name = $main
+      Version = $version
     }
   } catch {
     Add-Log ("Failed to read manifest.json: {0}" -f $_.Exception.Message)

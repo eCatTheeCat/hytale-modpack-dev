@@ -445,38 +445,38 @@ $x = [int]$wa.Right - [int]$form.Width - $margin
 $y = [int]$wa.Bottom - [int]$form.Height - $margin
 $form.Location = New-Object System.Drawing.Point($x, $y)
 
-$padding = 12
-$gap = 8
-$contentWidth = $form.ClientSize.Width - ($padding * 2)
+$layout = New-Object System.Windows.Forms.TableLayoutPanel
+$layout.Dock = [System.Windows.Forms.DockStyle]::Fill
+$layout.ColumnCount = 1
+$layout.RowCount = 4
+$layout.Padding = New-Object System.Windows.Forms.Padding(12)
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.AutoSize = $false
-$statusLabel.Size = New-Object System.Drawing.Size($contentWidth, 40)
-$statusLabel.Location = New-Object System.Drawing.Point($padding, $padding)
 $statusLabel.Text = "Ready."
-$statusLabel.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$statusLabel.Height = 40
+$statusLabel.Dock = [System.Windows.Forms.DockStyle]::Fill
+$statusLabel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
 
 $progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressY = $statusLabel.Location.Y + $statusLabel.Height + $gap
-$progressBar.Location = New-Object System.Drawing.Point($padding, $progressY)
-$progressBar.Size = New-Object System.Drawing.Size($contentWidth, 18)
 $progressBar.Minimum = 0
 $progressBar.Maximum = [Math]::Max(1, $total)
 $progressBar.Value = 0
 $progressBar.Style = "Continuous"
-$progressBar.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$progressBar.Height = 18
+$progressBar.Dock = [System.Windows.Forms.DockStyle]::Fill
+$progressBar.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
 
 $logList = New-Object System.Windows.Forms.ListBox
-$logTop = $progressY + $progressBar.Height + $gap
-$buttonSize = New-Object System.Drawing.Size(110, 24)
-$buttonY = $form.ClientSize.Height - $padding - $buttonSize.Height
-$logHeight = $buttonY - $gap - $logTop
-$logList.Location = New-Object System.Drawing.Point($padding, $logTop)
-$logList.Size = New-Object System.Drawing.Size($contentWidth, $logHeight)
+$logList.Dock = [System.Windows.Forms.DockStyle]::Fill
 $logList.IntegralHeight = $false
 $logList.HorizontalScrollbar = $true
 $script:MaxLogWidth = 0
-$logList.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Left -bor [System.Windows.Forms.AnchorStyles]::Right
+$logList.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
 
 foreach ($entry in $script:LogBuffer) {
   $logList.Items.Add($entry) | Out-Null
@@ -493,18 +493,29 @@ $script:LogBuffer.Clear()
 
 $abortButton = New-Object System.Windows.Forms.Button
 $abortButton.Text = "Abort Install"
-$abortButton.Size = $buttonSize
-$abortButton.Location = New-Object System.Drawing.Point($form.ClientSize.Width - $padding - $buttonSize.Width, $buttonY)
-$abortButton.Anchor = [System.Windows.Forms.AnchorStyles]::Bottom -bor [System.Windows.Forms.AnchorStyles]::Right
+$abortButton.Size = New-Object System.Drawing.Size(110, 24)
 $abortButton.Add_Click({
   $script:Abort = $true
   $statusLabel.Text = "Abort requested..."
   Add-Log "Abort requested by user."
 })
 
+$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+$buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
+$buttonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
+$buttonPanel.WrapContents = $false
+$buttonPanel.AutoSize = $true
+$buttonPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
+$buttonPanel.Margin = New-Object System.Windows.Forms.Padding(0)
+$buttonPanel.Controls.Add($abortButton)
+
 $form.Add_FormClosing({ $script:Abort = $true })
 
-$form.Controls.AddRange(@($statusLabel, $progressBar, $logList, $abortButton))
+$layout.Controls.Add($statusLabel, 0, 0) | Out-Null
+$layout.Controls.Add($progressBar, 0, 1) | Out-Null
+$layout.Controls.Add($logList, 0, 2) | Out-Null
+$layout.Controls.Add($buttonPanel, 0, 3) | Out-Null
+$form.Controls.Add($layout)
 
 function Add-Log([string]$text) {
   $stamp = (Get-Date).ToString("HH:mm:ss")

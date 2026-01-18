@@ -499,6 +499,8 @@ $form.Add_Shown({
   $completed = 0
   foreach ($url in $urls) {
     if ($script:Abort) { break }
+    $before = Get-DownloadSnapshot
+    Add-Log "Snapshot downloads folder (pre-open)."
     $cfInfo = ConvertFrom-CurseForgeUrl $url
     if ($cfInfo) {
       Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
@@ -524,9 +526,6 @@ $form.Add_Shown({
     Set-Status ("Opening in {0}: {1}" -f $script:BrowserName, $url)
     Add-Log ("Opening in {0}: {1}" -f $script:BrowserName, $url)
     Write-Host "`nOpening: $url"
-
-    Add-Log "Snapshot downloads folder."
-    $before = Get-DownloadSnapshot
 
     # Open URL in the user's default browser
     Open-UrlInDefaultBrowser $url

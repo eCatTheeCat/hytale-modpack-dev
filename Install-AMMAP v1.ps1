@@ -157,6 +157,25 @@ function Set-InstallIndex([string]$path, $data) {
   Set-Content -LiteralPath $path -Value $json -Encoding UTF8
 }
 
+function Get-ManifestFieldValue([string]$text, [string]$key) {
+  $k = [regex]::Escape($key)
+  $patterns = @(
+    '"{0}"\s*:\s*"([^"]*)"' -f $k,
+    '"{0}"\s*:\s*''([^'']*)''' -f $k,
+    '{0}\s*:\s*"([^"]*)"' -f $k,
+    '{0}\s*:\s*''([^'']*)''' -f $k,
+    '"{0}"\s*:\s*([^,\r\n}}]+)' -f $k,
+    '{0}\s*:\s*([^,\r\n}}]+)' -f $k
+  )
+  foreach ($pattern in $patterns) {
+    $m = [regex]::Match($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($m.Success) {
+      return $m.Groups[1].Value.Trim()
+    }
+  }
+  return $null
+}
+
 function Get-ModManifestInfo([string]$filePath) {
   try {
     $zip = [IO.Compression.ZipFile]::OpenRead($filePath)
@@ -190,12 +209,10 @@ function Get-ModManifestInfo([string]$filePath) {
     }
 
     if (-not $main) {
-      $mainMatch = [regex]::Match($jsonText, '"Main"\s*:\s*"([^"]*)"')
-      if ($mainMatch.Success) { $main = $mainMatch.Groups[1].Value }
+      $main = Get-ManifestFieldValue $jsonText "Main"
     }
     if (-not $version) {
-      $versionMatch = [regex]::Match($jsonText, '"Version"\s*:\s*"([^"]*)"')
-      if ($versionMatch.Success) { $version = $versionMatch.Groups[1].Value }
+      $version = Get-ManifestFieldValue $jsonText "Version"
     }
 
     return @{

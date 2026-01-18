@@ -24,8 +24,17 @@ $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
 $PollMs      = 50
 $TimeoutSec  = 180
 
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
+try {
+  Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+  Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+} catch {
+  $isPwsh = ($PSVersionTable.PSEdition -eq 'Core') -or ($PSVersionTable.PSVersion.Major -ge 6)
+  if ($isPwsh) {
+    Write-Host "WinForms failed to load in PowerShell 7. Install the .NET Desktop Runtime or run this script in Windows PowerShell 5.1."
+    exit 1
+  }
+  throw
+}
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $script:Abort = $false

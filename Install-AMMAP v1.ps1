@@ -7,15 +7,15 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
   if (-not $scriptPath) { $scriptPath = $MyInvocation.MyCommand.Path }
   $pwsh = Join-Path $PSHOME "pwsh.exe"
   $exe = if (Test-Path -LiteralPath $pwsh) { $pwsh } else { Join-Path $PSHOME "powershell.exe" }
-  $args = @()
+  $procArgs = @()
   if ($exe -like "*powershell.exe") {
-    $args += "-ExecutionPolicy"
-    $args += "Bypass"
+    $procArgs += "-ExecutionPolicy"
+    $procArgs += "Bypass"
   }
-  $args += "-Sta"
-  $args += "-File"
-  $args += "`"$scriptPath`""
-  Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $PSScriptRoot | Out-Null
+  $procArgs += "-Sta"
+  $procArgs += "-File"
+  $procArgs += "`"$scriptPath`""
+  Start-Process -FilePath $exe -ArgumentList $procArgs -WorkingDirectory $PSScriptRoot | Out-Null
   exit
 }
 
@@ -31,12 +31,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[string]
 
-function Queue-Log([string]$text) {
+function Add-LogBuffer([string]$text) {
   $stamp = (Get-Date).ToString("HH:mm:ss")
   $script:LogBuffer.Add("$stamp $text")
 }
 
-Queue-Log "Script started."
+Add-LogBuffer "Script started."
 
 function Split-CommandLine([string]$command) {
   if ([string]::IsNullOrWhiteSpace($command)) { return $null }
@@ -45,33 +45,33 @@ function Split-CommandLine([string]$command) {
     $end = $cmd.IndexOf('"', 1)
     if ($end -lt 1) { return $null }
     $exe = $cmd.Substring(1, $end - 1)
-    $args = $cmd.Substring($end + 1).Trim()
+    $cmdArgs = $cmd.Substring($end + 1).Trim()
   } else {
     $space = $cmd.IndexOf(' ')
     if ($space -lt 0) {
       $exe = $cmd
-      $args = ""
+      $cmdArgs = ""
     } else {
       $exe = $cmd.Substring(0, $space)
-      $args = $cmd.Substring($space + 1).Trim()
+      $cmdArgs = $cmd.Substring($space + 1).Trim()
     }
   }
-  return @{ Exe = $exe; Args = $args }
+  return @{ Exe = $exe; Args = $cmdArgs }
 }
 
-function Build-BrowserArguments([string]$args, [string]$url, [string]$prefixArgs) {
+function New-BrowserArguments([string]$browserArgs, [string]$url, [string]$prefixArgs) {
   $quotedUrl = '"' + $url + '"'
-  if ([string]::IsNullOrWhiteSpace($args)) {
+  if ([string]::IsNullOrWhiteSpace($browserArgs)) {
     if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return $quotedUrl }
     return ($prefixArgs + " " + $quotedUrl).Trim()
   }
-  if ($args -match '%1|%l|%u') {
-    $out = $args -replace '%1', $quotedUrl -replace '%l', $quotedUrl -replace '%u', $quotedUrl
+  if ($browserArgs -match '%1|%l|%u') {
+    $out = $browserArgs -replace '%1', $quotedUrl -replace '%l', $quotedUrl -replace '%u', $quotedUrl
     if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return $out.Trim() }
     return ($prefixArgs + " " + $out).Trim()
   }
-  if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return ($args + " " + $quotedUrl).Trim() }
-  return ($prefixArgs + " " + $args + " " + $quotedUrl).Trim()
+  if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return ($browserArgs + " " + $quotedUrl).Trim() }
+  return ($prefixArgs + " " + $browserArgs + " " + $quotedUrl).Trim()
 }
 
 function Get-BrowserInstanceArgs([string]$exePath) {
@@ -103,14 +103,14 @@ function Get-DefaultBrowserInfo {
 
 function Open-UrlInDefaultBrowser([string]$url) {
   if ($script:BrowserInfo -and (Test-Path -LiteralPath $script:BrowserInfo.Exe)) {
-    $args = Build-BrowserArguments $script:BrowserInfo.Args $url $script:BrowserInstanceArgs
-    Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $args | Out-Null
+    $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $script:BrowserInstanceArgs
+    Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $browserLaunchArgs | Out-Null
   } else {
     Start-Process $url | Out-Null
   }
 }
 
-function Parse-CurseForgeUrl([string]$url) {
+function ConvertFrom-CurseForgeUrl([string]$url) {
   $pattern = 'https?://www\.curseforge\.com/([^/]+)/mods/([^/]+)/download/(\d+)'
   $m = [regex]::Match($url, $pattern)
   if (-not $m.Success) { return $null }
@@ -121,7 +121,7 @@ function Parse-CurseForgeUrl([string]$url) {
   }
 }
 
-function Load-InstallIndex([string]$path) {
+function Get-InstallIndex([string]$path) {
   if (!(Test-Path -LiteralPath $path)) {
     return @{ mods = @() }
   }
@@ -129,7 +129,7 @@ function Load-InstallIndex([string]$path) {
     $raw = Get-Content -LiteralPath $path -Raw -ErrorAction Stop
     $data = $raw | ConvertFrom-Json -ErrorAction Stop
   } catch {
-    Queue-Log ("Failed to read install index, starting fresh: {0}" -f $_.Exception.Message)
+    Add-LogBuffer ("Failed to read install index, starting fresh: {0}" -f $_.Exception.Message)
     return @{ mods = @() }
   }
   if ($null -eq $data.mods) {
@@ -139,7 +139,7 @@ function Load-InstallIndex([string]$path) {
   return $data
 }
 
-function Save-InstallIndex([string]$path, $data) {
+function Set-InstallIndex([string]$path, $data) {
   $json = $data | ConvertTo-Json -Depth 6
   Set-Content -LiteralPath $path -Value $json -Encoding UTF8
 }
@@ -178,23 +178,23 @@ function Get-ModManifestInfo([string]$filePath) {
 
 function Get-HytaleUserDataDir {
   $defaultRoot = Join-Path $env:APPDATA "Hytale"
-  Queue-Log ("Checking default Hytale install at: {0}" -f $defaultRoot)
+  Add-LogBuffer ("Checking default Hytale install at: {0}" -f $defaultRoot)
   if (Test-Path -LiteralPath $defaultRoot) {
-    Queue-Log "Found default Hytale install."
+    Add-LogBuffer "Found default Hytale install."
     $root = $defaultRoot
   } else {
-    Queue-Log "Default install not found; prompting for location."
+    Add-LogBuffer "Default install not found; prompting for location."
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = "Select your Hytale install folder"
     $dialog.ShowNewFolderButton = $false
     $result = $dialog.ShowDialog()
     if ($result -ne [System.Windows.Forms.DialogResult]::OK -or
         [string]::IsNullOrWhiteSpace($dialog.SelectedPath)) {
-      Queue-Log "Install location not provided."
+      Add-LogBuffer "Install location not provided."
       return $null
     }
     $root = $dialog.SelectedPath
-    Queue-Log ("User selected install folder: {0}" -f $root)
+    Add-LogBuffer ("User selected install folder: {0}" -f $root)
   }
 
   if ([IO.Path]::GetFileName($root) -ieq "UserData") {
@@ -205,7 +205,7 @@ function Get-HytaleUserDataDir {
 
   if (!(Test-Path -LiteralPath $userData)) {
     New-Item -ItemType Directory -Force -Path $userData | Out-Null
-    Queue-Log ("Created UserData folder: {0}" -f $userData)
+    Add-LogBuffer ("Created UserData folder: {0}" -f $userData)
   }
 
   return $userData
@@ -213,32 +213,32 @@ function Get-HytaleUserDataDir {
 
 $UserDataDir = Get-HytaleUserDataDir
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
-Queue-Log ("Using UserData folder: {0}" -f $UserDataDir)
+Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
 
 $LinksFile   = Join-Path $PSScriptRoot "modDownloadLinks.txt"
 $DestDir     = Join-Path $UserDataDir "Mods"
 $InstallIndexFile = Join-Path $UserDataDir "modInstallIndex.json"
-Queue-Log ("Links file: {0}" -f $LinksFile)
-Queue-Log ("Mods folder: {0}" -f $DestDir)
-Queue-Log ("Install index: {0}" -f $InstallIndexFile)
+Add-LogBuffer ("Links file: {0}" -f $LinksFile)
+Add-LogBuffer ("Mods folder: {0}" -f $DestDir)
+Add-LogBuffer ("Install index: {0}" -f $InstallIndexFile)
 
 $script:LinksFileMissing = $false
 if (!(Test-Path $LinksFile)) {
   $script:LinksFileMissing = $true
-  Queue-Log ("Missing links file: {0}" -f $LinksFile)
+  Add-LogBuffer ("Missing links file: {0}" -f $LinksFile)
 }
 New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
-Queue-Log ("Ensured Mods folder exists: {0}" -f $DestDir)
+Add-LogBuffer ("Ensured Mods folder exists: {0}" -f $DestDir)
 
-$script:InstallIndex = Load-InstallIndex $InstallIndexFile
-Queue-Log ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
+$script:InstallIndex = Get-InstallIndex $InstallIndexFile
+Add-LogBuffer ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
 
 function Get-DownloadSnapshot {
   Get-ChildItem -LiteralPath $DownloadDir -File |
     Select-Object FullName, Name, Length, LastWriteTime
 }
 
-function Wait-FileUnlocked([string]$path, [int]$timeoutSec) {
+function Test-FileUnlocked([string]$path, [int]$timeoutSec) {
   Add-Log ("Checking file lock: {0}" -f $path)
   $sw = [Diagnostics.Stopwatch]::StartNew()
   while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
@@ -256,7 +256,7 @@ function Wait-FileUnlocked([string]$path, [int]$timeoutSec) {
   return $false
 }
 
-function Wait-NewDownloadComplete($beforeSnapshot) {
+function Get-NewCompletedDownload($beforeSnapshot) {
   $before = @{}
   foreach ($f in $beforeSnapshot) { $before[$f.FullName] = $true }
   $loggedCandidates = @{}
@@ -304,7 +304,7 @@ function Wait-NewDownloadComplete($beforeSnapshot) {
         if ($stable) {
           Add-Log ("Size stable: {0}" -f $f.FullName)
           $remaining = [Math]::Max(1, [int][Math]::Ceiling($TimeoutSec - $sw.Elapsed.TotalSeconds))
-          if (Wait-FileUnlocked $f.FullName $remaining) {
+          if (Test-FileUnlocked $f.FullName $remaining) {
             return $f.FullName
           }
         }
@@ -331,16 +331,16 @@ $script:BrowserInfo = Get-DefaultBrowserInfo
 $script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
 $script:BrowserInstanceArgs = if ($script:BrowserInfo) { Get-BrowserInstanceArgs $script:BrowserInfo.Exe } else { $null }
 if ($script:BrowserInfo) {
-  Queue-Log ("Default browser: {0}" -f $script:BrowserName)
+  Add-LogBuffer ("Default browser: {0}" -f $script:BrowserName)
   if ($script:BrowserInstanceArgs) {
-    Queue-Log ("Launching in new window/instance: {0}" -f $script:BrowserInstanceArgs)
+    Add-LogBuffer ("Launching in new window/instance: {0}" -f $script:BrowserInstanceArgs)
   } else {
-    Queue-Log "No new-window args for this browser; using default launch."
+    Add-LogBuffer "No new-window args for this browser; using default launch."
   }
-  Queue-Log "Browser windows will be left open to avoid affecting existing sessions."
+  Add-LogBuffer "Browser windows will be left open to avoid affecting existing sessions."
 } else {
-  Queue-Log "Default browser detection failed; using shell open."
-  Queue-Log "Browser windows will be left open to avoid affecting existing sessions."
+  Add-LogBuffer "Default browser detection failed; using shell open."
+  Add-LogBuffer "Browser windows will be left open to avoid affecting existing sessions."
 }
 
 $urls = if ($script:LinksFileMissing) {
@@ -359,9 +359,18 @@ $form.FormBorderStyle = "FixedToolWindow"
 $form.StartPosition = "Manual"
 $form.Size = New-Object System.Drawing.Size(360, 300)
 
-$wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen
+if (-not $screen) {
+  $screen = [System.Windows.Forms.Screen]::AllScreens | Select-Object -First 1
+}
+$wa = $screen.WorkingArea
+if ($wa -is [System.Array]) {
+  $wa = $wa | Select-Object -First 1
+}
 $margin = 12
-$form.Location = New-Object System.Drawing.Point($wa.Right - $form.Width - $margin, $wa.Bottom - $form.Height - $margin)
+$x = [int]$wa.Right - [int]$form.Width - $margin
+$y = [int]$wa.Bottom - [int]$form.Height - $margin
+$form.Location = New-Object System.Drawing.Point($x, $y)
 
 $statusLabel = New-Object System.Windows.Forms.Label
 $statusLabel.AutoSize = $false
@@ -438,7 +447,7 @@ $form.Add_Shown({
   $completed = 0
   foreach ($url in $urls) {
     if ($script:Abort) { break }
-    $cfInfo = Parse-CurseForgeUrl $url
+    $cfInfo = ConvertFrom-CurseForgeUrl $url
     if ($cfInfo) {
       Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
     } else {
@@ -472,7 +481,7 @@ $form.Add_Shown({
 
     Set-Status "Waiting for download..."
     Add-Log "Waiting for download..."
-    $downloadedPath = Wait-NewDownloadComplete $before
+    $downloadedPath = Get-NewCompletedDownload $before
 
     if ($script:Abort) { break }
 
@@ -554,7 +563,7 @@ $form.Add_Shown({
       installedAt = (Get-Date).ToString("s")
     }
     $script:InstallIndex.mods += [pscustomobject]$entry
-    Save-InstallIndex $InstallIndexFile $script:InstallIndex
+    Set-InstallIndex $InstallIndexFile $script:InstallIndex
     Add-Log ("Updated install index: {0}" -f $InstallIndexFile)
 
     Start-Sleep -Milliseconds 250
@@ -575,3 +584,4 @@ $form.Add_Shown({
 })
 
 [System.Windows.Forms.Application]::Run($form)
+

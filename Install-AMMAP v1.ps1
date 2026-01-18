@@ -78,7 +78,7 @@ function Get-BrowserInstanceArgs([string]$exePath) {
   if ([string]::IsNullOrWhiteSpace($exePath)) { return $null }
   $exeName = [IO.Path]::GetFileNameWithoutExtension($exePath).ToLowerInvariant()
   switch -Regex ($exeName) {
-    '^firefox$' { return "-new-instance -new-window" }
+    '^firefox$' { return "-new-window" }
     '^(chrome|msedge|brave|vivaldi|opera)$' { return "--new-window" }
     default { return $null }
   }

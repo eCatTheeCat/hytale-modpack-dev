@@ -299,6 +299,80 @@ Add-LogBuffer ("Ensured Mods folder exists: {0}" -f $DestDir)
 $script:InstallIndex = Get-InstallIndex $InstallIndexFile
 Add-LogBuffer ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
 
+$SavesDir = Join-Path $UserDataDir "Saves"
+$SaveName = "AMMAP"
+$SavePath = Join-Path $SavesDir $SaveName
+$ConfigSource = Join-Path $PSScriptRoot "AMMAP_CONFIG"
+
+function Get-BackupSavePath([string]$basePath) {
+  $dir = Split-Path -Parent $basePath
+  $base = (Split-Path -Leaf $basePath) + " old"
+  $candidate = Join-Path $dir $base
+  if (-not (Test-Path -LiteralPath $candidate)) { return $candidate }
+  $i = 1
+  do {
+    $candidate = Join-Path $dir ("{0} ({1})" -f $base, $i)
+    $i++
+  } while (Test-Path -LiteralPath $candidate)
+  return $candidate
+}
+
+function Copy-ConfigToSave([string]$sourceDir, [string]$destDir) {
+  if (!(Test-Path -LiteralPath $sourceDir)) {
+    Add-Log ("Config folder not found: {0}" -f $sourceDir)
+    return $false
+  }
+  New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+  $items = Get-ChildItem -LiteralPath $sourceDir -Force
+  if (-not $items) {
+    Add-Log "AMMAP_CONFIG is empty; nothing to copy."
+    return $true
+  }
+  foreach ($item in $items) {
+    Copy-Item -LiteralPath $item.FullName -Destination $destDir -Recurse -Force
+  }
+  return $true
+}
+
+function Set-AmmapSave {
+  if (!(Test-Path -LiteralPath $SavesDir)) {
+    New-Item -ItemType Directory -Force -Path $SavesDir | Out-Null
+    Add-Log ("Created Saves folder: {0}" -f $SavesDir)
+  }
+
+  if (!(Test-Path -LiteralPath $SavePath)) {
+    Add-Log ("Save folder not found, creating: {0}" -f $SavePath)
+    if (Copy-ConfigToSave $ConfigSource $SavePath) {
+      Add-Log "Copied AMMAP_CONFIG into new save."
+    }
+    return
+  }
+
+  $msg = "AMMAP save already exists.`n`nYes = Create New Save (rename existing)`nNo = Overwrite Existing Save`nCancel = Skip"
+  $choice = [System.Windows.Forms.MessageBox]::Show(
+    $msg,
+    "AMMAP Save",
+    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+    [System.Windows.Forms.MessageBoxIcon]::Question
+  )
+
+  if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
+    $backupPath = Get-BackupSavePath $SavePath
+    Move-Item -LiteralPath $SavePath -Destination $backupPath
+    Add-Log ("Renamed existing save to: {0}" -f $backupPath)
+    if (Copy-ConfigToSave $ConfigSource $SavePath) {
+      Add-Log "Created new AMMAP save from AMMAP_CONFIG."
+    }
+  } elseif ($choice -eq [System.Windows.Forms.DialogResult]::No) {
+    Add-Log "Overwriting existing AMMAP save with AMMAP_CONFIG contents."
+    if (Copy-ConfigToSave $ConfigSource $SavePath) {
+      Add-Log "Merged AMMAP_CONFIG into existing save."
+    }
+  } else {
+    Add-Log "Save update skipped by user."
+  }
+}
+
 function Get-DownloadSnapshot {
   Get-ChildItem -LiteralPath $DownloadDir -File |
     Select-Object FullName, Name, Length, LastWriteTime
@@ -689,6 +763,8 @@ $form.Add_Shown({
 
   Set-Status "Done."
   Add-Log "Done."
+  Add-Log "Updating AMMAP save..."
+  Set-AmmapSave
   if ($script:BrowserName -ieq "firefox" -and $script:BrowserSessionOpened) {
     Add-Log "Closing Firefox download window..."
     Stop-FirefoxWindow

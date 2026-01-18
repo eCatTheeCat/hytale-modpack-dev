@@ -112,8 +112,12 @@ function Get-DefaultBrowserInfo {
 
 function Open-UrlInDefaultBrowser([string]$url) {
   if ($script:BrowserInfo -and (Test-Path -LiteralPath $script:BrowserInfo.Exe)) {
-    $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $script:BrowserInstanceArgs
-    Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $browserLaunchArgs | Out-Null
+    if ($script:BrowserName -ieq "firefox") {
+      Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-window", $url) | Out-Null
+    } else {
+      $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $script:BrowserInstanceArgs
+      Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $browserLaunchArgs | Out-Null
+    }
   } else {
     Start-Process $url | Out-Null
   }

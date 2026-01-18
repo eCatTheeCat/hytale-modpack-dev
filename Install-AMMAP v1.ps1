@@ -174,12 +174,7 @@ function Set-InstallIndex([string]$path, $data) {
 function Get-ManifestFieldValue([string]$text, [string]$key) {
   $k = [regex]::Escape($key)
   $patterns = @(
-    '"{0}"\s*:\s*"([^"]*)"' -f $k,
-    '"{0}"\s*:\s*''([^'']*)''' -f $k,
-    '{0}\s*:\s*"([^"]*)"' -f $k,
-    '{0}\s*:\s*''([^'']*)''' -f $k,
-    '"{0}"\s*:\s*([^,\r\n}}]+)' -f $k,
-    '{0}\s*:\s*([^,\r\n}}]+)' -f $k
+    '"{0}"\s*:\s*"([^"]*)"' -f $k
   )
   foreach ($pattern in $patterns) {
     $m = [regex]::Match($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
@@ -224,6 +219,11 @@ function Get-ModManifestInfo([string]$filePath) {
 
     if (-not $main) {
       $main = Get-ManifestFieldValue $jsonText "Main"
+      if ($main) { Add-Log "Manifest field used: Main" }
+    }
+    if (-not $main) {
+      $main = Get-ManifestFieldValue $jsonText "Name"
+      if ($main) { Add-Log "Manifest field used: Name (fallback)" }
     }
     if (-not $version) {
       $version = Get-ManifestFieldValue $jsonText "Version"

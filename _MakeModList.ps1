@@ -1,5 +1,5 @@
 # MakeModList.ps1
-# Generates names.txt in the folder this script is run from.
+# Generates _ModList.txt in the folder this script is run from.
 
 $OutName = "_ModList.txt"
 $OutFile = Join-Path $PWD $OutName

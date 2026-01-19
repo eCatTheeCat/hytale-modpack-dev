@@ -24,6 +24,7 @@ $DownloadDir = Join-Path $env:USERPROFILE "Downloads"
 $PollMs      = 50
 $TimeoutSec  = 180
 $MinStableAgeMs = 1000
+$NoFileTimeoutSec = 10
 
 try {
   Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
@@ -421,6 +422,7 @@ function Get-NewCompletedDownload($beforeSnapshot) {
   foreach ($f in $beforeSnapshot) { $before[$f.FullName] = $true }
   $loggedCandidates = @{}
   $loggedZero = @{}
+  $sawAnyNew = $false
 
   $sw = [Diagnostics.Stopwatch]::StartNew()
   while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
@@ -431,6 +433,11 @@ function Get-NewCompletedDownload($beforeSnapshot) {
     # New files (not present before)
     $current = Get-ChildItem -LiteralPath $DownloadDir -File
     $newFiles = $current | Where-Object { -not $before.ContainsKey($_.FullName) }
+    if ($newFiles.Count -gt 0) { $sawAnyNew = $true }
+    if (-not $sawAnyNew -and $sw.Elapsed.TotalSeconds -ge $NoFileTimeoutSec) {
+      Add-Log ("No download detected within {0}s; skipping." -f $NoFileTimeoutSec) "warn"
+      return $null
+    }
 
     # If Firefox is still downloading, it often leaves a *.part file behind.
     # Wait until we see at least one new NON-.part file and no matching .part alongside it.

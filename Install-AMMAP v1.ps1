@@ -353,12 +353,28 @@ function Set-AmmapSave {
   }
 
   $msg = "AMMAP save already exists.`n`nYes = Create New Save (rename existing)`nNo = Overwrite Existing Save`nCancel = Skip"
-  $choice = [System.Windows.Forms.MessageBox]::Show(
-    $msg,
-    "AMMAP Save",
-    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-    [System.Windows.Forms.MessageBoxIcon]::Question
-  )
+  $owner = $script:MainForm
+  if ($owner) {
+    $owner.TopMost = $true
+    $owner.Activate()
+  }
+  $choice = if ($owner) {
+    [System.Windows.Forms.MessageBox]::Show(
+      $owner,
+      $msg,
+      "AMMAP Save",
+      [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+      [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+  } else {
+    [System.Windows.Forms.MessageBox]::Show(
+      $msg,
+      "AMMAP Save",
+      [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+      [System.Windows.Forms.MessageBoxIcon]::Question
+    )
+  }
+  if ($owner) { $owner.TopMost = $false }
 
   if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
     $backupPath = Get-BackupSavePath $SavePath
@@ -531,6 +547,7 @@ $form.StartPosition = "Manual"
 $form.Size = New-Object System.Drawing.Size(520, 340)
 $form.MinimumSize = New-Object System.Drawing.Size(420, 260)
 $form.BackColor = $uiBg
+$script:MainForm = $form
 
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen
 if (-not $screen) {
@@ -917,12 +934,12 @@ $form.Add_Shown({
 
   Set-Status "Done."
   Add-Log "Done." "success"
-  Add-Log "Updating AMMAP save..."
-  Set-AmmapSave
   if ($script:BrowserName -ieq "firefox" -and $script:BrowserSessionOpened) {
     Add-Log "Closing Firefox download window..."
     Stop-FirefoxWindow
   }
+  Add-Log "Updating AMMAP save..."
+  Set-AmmapSave
   Write-Host "`nDone."
 })
 

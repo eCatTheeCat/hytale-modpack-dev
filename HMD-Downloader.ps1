@@ -4,13 +4,14 @@
 Set-StrictMode -Version Latest
 
 function ConvertFrom-HMDCurseForgeUrl([string]$url) {
-  $pattern = 'https?://www\.curseforge\.com/([^/]+)/mods/([^/]+)/download/(\d+)'
-  $m = [regex]::Match($url, $pattern)
+  $pattern = '^https?://www\.curseforge\.com/([^/]+)/mods/([^/]+)/download(?:/(\d+))?/?'
+  $m = [regex]::Match($url, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if (-not $m.Success) { return $null }
+  $fileId = if ($m.Groups[3].Success -and $m.Groups[3].Value) { $m.Groups[3].Value } else { $null }
   return [pscustomobject]@{
     Game = $m.Groups[1].Value
     ModSlug = $m.Groups[2].Value
-    FileId = $m.Groups[3].Value
+    FileId = $fileId
   }
 }
 

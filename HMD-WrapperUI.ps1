@@ -149,6 +149,13 @@ function ConvertFrom-CurseForgeUrl([string]$url) {
   return ConvertFrom-HMDCurseForgeUrl $url
 }
 
+function Get-LatestCurseForgeUrl([string]$url) {
+  $pattern = '^https?://www\.curseforge\.com/([^/]+)/mods/([^/]+)/download(?:/(\d+))?/?'
+  $m = [regex]::Match($url, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if (-not $m.Success) { return $null }
+  return ("https://www.curseforge.com/{0}/mods/{1}/download/" -f $m.Groups[1].Value, $m.Groups[2].Value)
+}
+
 function Get-InstallIndex([string]$path) {
   return Get-HMDIndex $path
 }
@@ -781,79 +788,84 @@ function Set-Progress([int]$value) {
   [System.Windows.Forms.Application]::DoEvents()
 }
 
-$form.Add_Shown({
-  if ($total -eq 0) {
-    if ($script:LinksFileMissing) {
-      Set-Status "Missing modDownloadLinks.txt."
-      Add-Log "Missing modDownloadLinks.txt." "error"
-    } else {
-      Set-Status "No URLs found in modDownloadLinks.txt."
-      Add-Log "No URLs found in modDownloadLinks.txt."
-    }
-    return
-  }
-
-  $completed = 0
-  $urlsToDownload = @()
-  foreach ($url in $urls) {
+function Get-UrlsToDownload([string[]]$inputUrls, [ref]$completedRef) {
+  $out = @()
+  foreach ($url in $inputUrls) {
     if ($script:Abort) { break }
     $cfInfo = ConvertFrom-CurseForgeUrl $url
+    $skipEntry = $null
+    $skipReason = $null
+
     if ($cfInfo) {
-      Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
+      if ($cfInfo.FileId) {
+        Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
+        $existingEntry = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.fileId -eq $cfInfo.FileId } |
+          Select-Object -First 1
+        if ($existingEntry -and $existingEntry.fileName) {
+          $existingPath = Join-Path $DestDir $existingEntry.fileName
+          if (Test-Path -LiteralPath $existingPath) {
+            $skipEntry = $existingEntry
+            $skipReason = "fileId"
+          }
+        }
+      } else {
+        Add-Log ("Parsed CurseForge URL: mod={0} (latest)" -f $cfInfo.ModSlug)
+        $existingEntries = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.modSlug -eq $cfInfo.ModSlug }
+        $sawExistingFile = $false
+        foreach ($entry in $existingEntries) {
+          if (-not $entry.fileName) { continue }
+          $existingPath = Join-Path $DestDir $entry.fileName
+          if (-not (Test-Path -LiteralPath $existingPath)) { continue }
+          $sawExistingFile = $true
+          $currentHash = Get-HMDFileHash $existingPath
+          if (-not $currentHash) { continue }
+          if ($entry.sha256 -and $entry.sha256 -eq $currentHash) {
+            $skipEntry = $entry
+            $skipReason = "latest-hash"
+            break
+          }
+          if (-not $entry.sha256) {
+            $entry.sha256 = $currentHash
+            $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
+            Set-InstallIndex $InstallIndexFile $script:InstallIndex
+            Add-Log ("Backfilled sha256 for {0}" -f $entry.fileName)
+            $skipEntry = $entry
+            $skipReason = "latest-backfill"
+            break
+          }
+        }
+        if (-not $skipEntry -and $sawExistingFile) {
+          Add-Log ("Existing mod found for {0}, but hash mismatch; will re-download." -f $cfInfo.ModSlug) "warn"
+        }
+      }
     } else {
       Add-Log "URL not recognized as CurseForge format."
     }
 
-    $existingEntry = $null
-    if ($cfInfo -and $cfInfo.FileId) {
-      $existingEntry = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.fileId -eq $cfInfo.FileId } |
-        Select-Object -First 1
-      if ($existingEntry -and $existingEntry.fileName) {
-        $existingPath = Join-Path $DestDir $existingEntry.fileName
-        if (Test-Path -LiteralPath $existingPath) {
-          Set-Status ("Already installed: {0}" -f $existingEntry.fileName)
-          Add-Log ("Skipping already installed fileId {0}: {1}" -f $cfInfo.FileId, $existingEntry.fileName)
-          $completed++
-          Set-Progress $completed
-          continue
-        }
+    if ($skipEntry) {
+      Set-Status ("Already installed: {0}" -f $skipEntry.fileName)
+      if ($skipReason -eq "fileId") {
+        Add-Log ("Skipping already installed fileId {0}: {1}" -f $cfInfo.FileId, $skipEntry.fileName)
+      } else {
+        Add-Log ("Skipping already installed latest for mod {0}: {1}" -f $cfInfo.ModSlug, $skipEntry.fileName)
       }
+      $completedRef.Value++
+      Set-Progress $completedRef.Value
+      continue
     }
 
-    $urlsToDownload += $url
+    $out += $url
   }
+  return ,$out
+}
 
-  $downloadOptions = @{
-    DownloadDir = $DownloadDir
-    DestDir = $DestDir
-    PollMs = $PollMs
-    TimeoutSec = $TimeoutSec
-    NoFileTimeoutSec = $NoFileTimeoutSec
-    MinStableAgeMs = $MinStableAgeMs
-    BrowserState = $script:BrowserState
-    BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-BrowserArguments $browserArgs $url $prefixArgs }
-    OnLog = { param($msg, $level)
-      Add-Log $msg $level
-      if ($msg -like "Opening:*") { Set-Status $msg }
-      elseif ($msg -like "Waiting for download*") { Set-Status "Waiting for download..." }
-      elseif ($msg -like "Moved to:*") { Set-Status $msg }
-    }
-    OnProgress = { param($count) Set-Progress ($completed + $count) }
-    AbortFlag = { return $script:Abort }
-  }
-
-  $downloadResults = @()
-  if ($urlsToDownload.Count -gt 0 -and -not $script:Abort) {
-    $downloadResults = Invoke-HMDDownloads $urlsToDownload $downloadOptions
-  }
-
-  $completed += $downloadResults.Count
-  Set-Progress $completed
-
-  foreach ($result in $downloadResults) {
+function Process-DownloadResults([object[]]$results) {
+  $failed = @()
+  foreach ($result in $results) {
     if ($script:Abort) { break }
     if ($result.status -ne "success" -or -not $result.destPath) {
       Add-Log ("Download failed for {0} ({1})" -f $result.url, $result.reason) "warn"
+      $failed += $result
       continue
     }
 
@@ -907,6 +919,115 @@ $form.Add_Shown({
     $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
     Set-InstallIndex $InstallIndexFile $script:InstallIndex
     Add-Log ("Updated install index: {0}" -f $InstallIndexFile) "success"
+  }
+  return ,$failed
+}
+
+$form.Add_Shown({
+  if ($total -eq 0) {
+    if ($script:LinksFileMissing) {
+      Set-Status "Missing modDownloadLinks.txt."
+      Add-Log "Missing modDownloadLinks.txt." "error"
+    } else {
+      Set-Status "No URLs found in modDownloadLinks.txt."
+      Add-Log "No URLs found in modDownloadLinks.txt."
+    }
+    return
+  }
+
+  $completed = 0
+  $urlsToDownload = Get-UrlsToDownload $urls ([ref]$completed)
+
+  $downloadOptions = @{
+    DownloadDir = $DownloadDir
+    DestDir = $DestDir
+    PollMs = $PollMs
+    TimeoutSec = $TimeoutSec
+    NoFileTimeoutSec = $NoFileTimeoutSec
+    MinStableAgeMs = $MinStableAgeMs
+    BrowserState = $script:BrowserState
+    BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-BrowserArguments $browserArgs $url $prefixArgs }
+    OnLog = { param($msg, $level)
+      Add-Log $msg $level
+      if ($msg -like "Opening:*") { Set-Status $msg }
+      elseif ($msg -like "Waiting for download*") { Set-Status "Waiting for download..." }
+      elseif ($msg -like "Moved to:*") { Set-Status $msg }
+    }
+    OnProgress = { param($count) Set-Progress ($completed + $count) }
+    AbortFlag = { return $script:Abort }
+  }
+
+  $downloadResults = @()
+  if ($urlsToDownload.Count -gt 0 -and -not $script:Abort) {
+    $downloadResults = Invoke-HMDDownloads $urlsToDownload $downloadOptions
+  }
+
+  $completed += $downloadResults.Count
+  Set-Progress $completed
+
+  $failedDownloads = Process-DownloadResults $downloadResults
+
+  if ($failedDownloads.Count -gt 0 -and -not $script:Abort) {
+    $owner = $script:MainForm
+    if ($owner) {
+      $owner.TopMost = $true
+      $owner.Activate()
+    }
+    $retryPrompt = "Some downloads failed.`n`nRetry using latest CurseForge links?`nYes = Retry failed mods`nNo = Skip"
+    $retryChoice = if ($owner) {
+      [System.Windows.Forms.MessageBox]::Show(
+        $owner,
+        $retryPrompt,
+        "Retry Failed Downloads",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+      )
+    } else {
+      [System.Windows.Forms.MessageBox]::Show(
+        $retryPrompt,
+        "Retry Failed Downloads",
+        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+        [System.Windows.Forms.MessageBoxIcon]::Question
+      )
+    }
+    if ($owner) { $owner.TopMost = $false }
+
+    if ($retryChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
+      $retryUrls = @()
+      foreach ($fail in $failedDownloads) {
+        $latestUrl = Get-LatestCurseForgeUrl $fail.url
+        if ($latestUrl) {
+          $retryUrls += $latestUrl
+        } else {
+          Add-Log ("Retry skipped; not a CurseForge URL: {0}" -f $fail.url) "warn"
+        }
+      }
+      $retryUrls = $retryUrls | Sort-Object -Unique
+
+      if ($retryUrls.Count -gt 0) {
+        Add-Log ("Retrying failed downloads using latest links: {0}" -f $retryUrls.Count) "warn"
+        Set-Status ("Retrying {0} downloads..." -f $retryUrls.Count)
+        $script:ProgressMax = [Math]::Max(1, $script:ProgressMax + $retryUrls.Count)
+        Set-Progress $completed
+
+        $retryUrlsToDownload = Get-UrlsToDownload $retryUrls ([ref]$completed)
+        if ($retryUrlsToDownload.Count -gt 0 -and -not $script:Abort) {
+          $retryResults = Invoke-HMDDownloads $retryUrlsToDownload $downloadOptions
+          $completed += $retryResults.Count
+          Set-Progress $completed
+          $retryFailed = Process-DownloadResults $retryResults
+          if ($retryFailed.Count -gt 0) {
+            Add-Log ("Some downloads still failed after retry: {0}" -f $retryFailed.Count) "warn"
+          }
+        } else {
+          Add-Log "No retry downloads needed after filtering." "warn"
+        }
+      } else {
+        Add-Log "No retryable CurseForge URLs found." "warn"
+      }
+    } else {
+      Add-Log "Retry skipped by user." "warn"
+    }
   }
 
   if ($script:Abort) {

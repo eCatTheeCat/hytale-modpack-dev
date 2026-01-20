@@ -1016,6 +1016,10 @@ $form.Add_Shown({
           $completed += $retryResults.Count
           Set-Progress $completed
           $retryFailed = Process-DownloadResults $retryResults
+          $retrySuccessCount = @($retryResults | Where-Object { $_.status -eq "success" }).Count
+          $retryFailCount = $retryFailed.Count
+          $retryLevel = if ($retryFailCount -eq 0) { "success" } else { "warn" }
+          Add-Log ("Retry results: {0} succeeded, {1} failed." -f $retrySuccessCount, $retryFailCount) $retryLevel
           if ($retryFailed.Count -gt 0) {
             Add-Log ("Some downloads still failed after retry: {0}" -f $retryFailed.Count) "warn"
           }

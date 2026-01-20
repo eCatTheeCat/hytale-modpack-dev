@@ -806,7 +806,8 @@ $form.Add_Shown({
 
     $existingEntry = $null
     if ($cfInfo -and $cfInfo.FileId) {
-      $existingEntry = $script:InstallIndex.mods | Where-Object { $_.fileId -eq $cfInfo.FileId } | Select-Object -First 1
+      $existingEntry = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.fileId -eq $cfInfo.FileId } |
+        Select-Object -First 1
       if ($existingEntry -and $existingEntry.fileName) {
         $existingPath = Join-Path $DestDir $existingEntry.fileName
         if (Test-Path -LiteralPath $existingPath) {
@@ -874,13 +875,10 @@ $form.Add_Shown({
     $game = if ($cfInfo) { $cfInfo.Game } else { $null }
     $modSlug = if ($cfInfo) { $cfInfo.ModSlug } else { $null }
     $fileName = [IO.Path]::GetFileName($dest)
-
-    if ($fileId) {
-      $script:InstallIndex.mods = @($script:InstallIndex.mods | Where-Object { $_.fileId -ne $fileId })
-    }
+    $sha256 = Get-HMDFileHash $dest
 
     if ($modName -and $modVersion) {
-      $oldEntries = $script:InstallIndex.mods | Where-Object { $_.modName -eq $modName -and $_.version -ne $modVersion }
+      $oldEntries = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.modName -eq $modName -and $m.version -ne $modVersion }
       foreach ($old in $oldEntries) {
         if ($old.fileName) {
           $oldPath = Join-Path $DestDir $old.fileName
@@ -890,7 +888,7 @@ $form.Add_Shown({
           }
         }
       }
-      $script:InstallIndex.mods = @($script:InstallIndex.mods | Where-Object { $_.modName -ne $modName -or $_.version -eq $modVersion })
+      $script:InstallIndex = Remove-HMDIndexEntries $script:InstallIndex { param($m) $m.modName -eq $modName -and $m.version -ne $modVersion }
     }
 
     $entry = [ordered]@{
@@ -899,11 +897,14 @@ $form.Add_Shown({
       version = $modVersion
       fileName = $fileName
       url = $result.url
+      sourceType = if ($fileId) { "fileId" } else { "latest" }
+      sourceUrl = $result.url
       game = $game
       modSlug = $modSlug
+      sha256 = $sha256
       installedAt = (Get-Date).ToString("s")
     }
-    $script:InstallIndex.mods += [pscustomobject]$entry
+    $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
     Set-InstallIndex $InstallIndexFile $script:InstallIndex
     Add-Log ("Updated install index: {0}" -f $InstallIndexFile) "success"
   }

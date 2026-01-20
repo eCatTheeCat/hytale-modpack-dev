@@ -489,6 +489,12 @@ $script:BrowserInfo = Get-DefaultBrowserInfo
 $script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
 $script:BrowserInstanceArgs = if ($script:BrowserInfo) { Get-BrowserInstanceArgs $script:BrowserInfo.Exe } else { $null }
 $script:BrowserSessionOpened = $false
+$script:BrowserState = [pscustomobject]@{
+  Info = $script:BrowserInfo
+  Name = $script:BrowserName
+  InstanceArgs = $script:BrowserInstanceArgs
+  SessionOpened = $false
+}
 if ($script:BrowserInfo) {
   Add-LogBuffer ("Default browser: {0}" -f $script:BrowserName)
   if ($script:BrowserInstanceArgs) {
@@ -788,10 +794,9 @@ $form.Add_Shown({
   }
 
   $completed = 0
+  $urlsToDownload = @()
   foreach ($url in $urls) {
     if ($script:Abort) { break }
-    $before = Get-DownloadSnapshot
-    Add-Log "Snapshot downloads folder (pre-open)."
     $cfInfo = ConvertFrom-CurseForgeUrl $url
     if ($cfInfo) {
       Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
@@ -814,51 +819,44 @@ $form.Add_Shown({
       }
     }
 
-    Set-Status ("Opening in {0}: {1}" -f $script:BrowserName, $url)
-    Add-Log ("Opening in {0}: {1}" -f $script:BrowserName, $url)
-    Write-Host "`nOpening: $url"
+    $urlsToDownload += $url
+  }
 
-    # Open URL in the user's default browser
-    Open-UrlInDefaultBrowser $url
+  $downloadOptions = @{
+    DownloadDir = $DownloadDir
+    DestDir = $DestDir
+    PollMs = $PollMs
+    TimeoutSec = $TimeoutSec
+    NoFileTimeoutSec = $NoFileTimeoutSec
+    MinStableAgeMs = $MinStableAgeMs
+    BrowserState = $script:BrowserState
+    BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-BrowserArguments $browserArgs $url $prefixArgs }
+    OnLog = { param($msg, $level)
+      Add-Log $msg $level
+      if ($msg -like "Opening:*") { Set-Status $msg }
+      elseif ($msg -like "Waiting for download*") { Set-Status "Waiting for download..." }
+      elseif ($msg -like "Moved to:*") { Set-Status $msg }
+    }
+    OnProgress = { param($count) Set-Progress ($completed + $count) }
+    AbortFlag = { return $script:Abort }
+  }
 
-    Set-Status "Waiting for download..."
-    Add-Log "Waiting for download..."
-    $downloadedPath = Get-NewCompletedDownload $before
+  $downloadResults = @()
+  if ($urlsToDownload.Count -gt 0 -and -not $script:Abort) {
+    $downloadResults = Invoke-HMDDownloads $urlsToDownload $downloadOptions
+  }
 
+  $completed += $downloadResults.Count
+  Set-Progress $completed
+
+  foreach ($result in $downloadResults) {
     if ($script:Abort) { break }
-
-    if (-not $downloadedPath) {
-      Set-Status "Timed out waiting for download."
-      Add-Log "Timed out waiting for download." "warn"
-      Write-Warning "Timed out waiting for download. Leaving tab open and moving on."
-      $completed++
-      Set-Progress $completed
+    if ($result.status -ne "success" -or -not $result.destPath) {
+      Add-Log ("Download failed for {0} ({1})" -f $result.url, $result.reason) "warn"
       continue
     }
 
-    Set-Status ("Downloaded: {0}" -f $downloadedPath)
-    Add-Log ("Downloaded: {0}" -f $downloadedPath)
-    Write-Host "Downloaded: $downloadedPath"
-
-    # Move into Mods folder (rename collisions safely)
-    $name = [IO.Path]::GetFileName($downloadedPath)
-    $dest = Join-Path $DestDir $name
-
-    if (Test-Path -LiteralPath $dest) {
-      $base = [IO.Path]::GetFileNameWithoutExtension($name)
-      $ext  = [IO.Path]::GetExtension($name)
-      $i = 1
-      do {
-        $dest = Join-Path $DestDir ("{0} ({1}){2}" -f $base, $i, $ext)
-        $i++
-      } while (Test-Path -LiteralPath $dest)
-    }
-
-    Move-Item -LiteralPath $downloadedPath -Destination $dest
-    Set-Status ("Moved to: {0}" -f $dest)
-    Add-Log ("Moved to: {0}" -f $dest)
-    Write-Host "Moved to: $dest"
-
+    $dest = $result.destPath
     Add-Log ("Reading manifest: {0}" -f $dest)
     $manifestInfo = Get-ModManifestInfo $dest
     $modName = $null
@@ -871,6 +869,7 @@ $form.Add_Shown({
       Add-Log "Manifest info missing; recording file without name/version." "warn"
     }
 
+    $cfInfo = ConvertFrom-CurseForgeUrl $result.url
     $fileId = if ($cfInfo) { $cfInfo.FileId } else { $null }
     $game = if ($cfInfo) { $cfInfo.Game } else { $null }
     $modSlug = if ($cfInfo) { $cfInfo.ModSlug } else { $null }
@@ -887,7 +886,7 @@ $form.Add_Shown({
           $oldPath = Join-Path $DestDir $old.fileName
           if (Test-Path -LiteralPath $oldPath) {
             Remove-Item -LiteralPath $oldPath -Force
-    Add-Log ("Removed old version: {0}" -f $old.fileName)
+            Add-Log ("Removed old version: {0}" -f $old.fileName)
           }
         }
       }
@@ -899,7 +898,7 @@ $form.Add_Shown({
       modName = $modName
       version = $modVersion
       fileName = $fileName
-      url = $url
+      url = $result.url
       game = $game
       modSlug = $modSlug
       installedAt = (Get-Date).ToString("s")
@@ -907,11 +906,6 @@ $form.Add_Shown({
     $script:InstallIndex.mods += [pscustomobject]$entry
     Set-InstallIndex $InstallIndexFile $script:InstallIndex
     Add-Log ("Updated install index: {0}" -f $InstallIndexFile) "success"
-
-    Start-Sleep -Milliseconds 250
-
-    $completed++
-    Set-Progress $completed
   }
 
   if ($script:Abort) {
@@ -922,7 +916,7 @@ $form.Add_Shown({
 
   Set-Status "Done."
   Add-Log "Done." "success"
-  if ($script:BrowserName -ieq "firefox" -and $script:BrowserSessionOpened) {
+  if ($script:BrowserName -ieq "firefox" -and $script:BrowserState.SessionOpened) {
     Add-Log "Closing Firefox download window..."
     Stop-FirefoxWindow
   }

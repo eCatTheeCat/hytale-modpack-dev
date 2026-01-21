@@ -41,6 +41,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 . (Join-Path $PSScriptRoot "HMD-IndexHandler.ps1")
 . (Join-Path $PSScriptRoot "HMD-Downloader.ps1")
+. (Join-Path $PSScriptRoot "HMD-Browser.ps1")
 
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[object]
@@ -54,69 +55,6 @@ function Add-LogBuffer([string]$text, [string]$level = "info") {
 }
 
 Add-LogBuffer "Script started."
-
-function Split-CommandLine([string]$command) {
-  if ([string]::IsNullOrWhiteSpace($command)) { return $null }
-  $cmd = $command.Trim()
-  if ($cmd.StartsWith('"')) {
-    $end = $cmd.IndexOf('"', 1)
-    if ($end -lt 1) { return $null }
-    $exe = $cmd.Substring(1, $end - 1)
-    $cmdArgs = $cmd.Substring($end + 1).Trim()
-  } else {
-    $space = $cmd.IndexOf(' ')
-    if ($space -lt 0) {
-      $exe = $cmd
-      $cmdArgs = ""
-    } else {
-      $exe = $cmd.Substring(0, $space)
-      $cmdArgs = $cmd.Substring($space + 1).Trim()
-    }
-  }
-  return @{ Exe = $exe; Args = $cmdArgs }
-}
-
-function New-BrowserArguments([string]$browserArgs, [string]$url, [string]$prefixArgs) {
-  $quotedUrl = '"' + $url + '"'
-  if ([string]::IsNullOrWhiteSpace($browserArgs)) {
-    if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return $quotedUrl }
-    return ($prefixArgs + " " + $quotedUrl).Trim()
-  }
-  if ($browserArgs -match '%1|%l|%u') {
-    $out = $browserArgs -replace '%1', $quotedUrl -replace '%l', $quotedUrl -replace '%u', $quotedUrl
-    if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return $out.Trim() }
-    return ($prefixArgs + " " + $out).Trim()
-  }
-  if ([string]::IsNullOrWhiteSpace($prefixArgs)) { return ($browserArgs + " " + $quotedUrl).Trim() }
-  return ($prefixArgs + " " + $browserArgs + " " + $quotedUrl).Trim()
-}
-
-function Get-BrowserInstanceArgs([string]$exePath) {
-  if ([string]::IsNullOrWhiteSpace($exePath)) { return $null }
-  $exeName = [IO.Path]::GetFileNameWithoutExtension($exePath).ToLowerInvariant()
-  switch -Regex ($exeName) {
-    '^firefox$' { return "-new-window" }
-    '^(chrome|msedge|brave|vivaldi|opera)$' { return "--new-window" }
-    default { return $null }
-  }
-}
-
-function Get-DefaultBrowserInfo {
-  $progId = (Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice" -ErrorAction SilentlyContinue).ProgId
-  if (-not $progId) { return $null }
-  $cmdKey = "Registry::HKEY_CLASSES_ROOT\$progId\shell\open\command"
-  $cmd = $null
-  try {
-    $cmd = (Get-Item -Path $cmdKey -ErrorAction Stop).GetValue('')
-  } catch {
-    return $null
-  }
-  if (-not $cmd) { return $null }
-  $parsed = Split-CommandLine $cmd
-  if (-not $parsed) { return $null }
-  if ([IO.Path]::GetFileName($parsed.Exe) -ieq "rundll32.exe") { return $null }
-  return $parsed
-}
 
 function ConvertFrom-CurseForgeUrl([string]$url) {
   return ConvertFrom-HMDCurseForgeUrl $url
@@ -347,27 +285,10 @@ function Set-AmmapSave {
   }
 }
 
-function Stop-FirefoxWindow {
-  # Best-effort: bring Firefox to front and send Ctrl+Shift+W (close window)
-  try {
-    $ws = New-Object -ComObject WScript.Shell
-    $null = $ws.AppActivate("Mozilla Firefox")
-    Start-Sleep -Milliseconds 150
-    $ws.SendKeys("^+w")
-  } catch {
-    # If this fails, we don't hard-stop; window may stay open
-  }
-}
-
-$script:BrowserInfo = Get-DefaultBrowserInfo
-$script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
-$script:BrowserInstanceArgs = if ($script:BrowserInfo) { Get-BrowserInstanceArgs $script:BrowserInfo.Exe } else { $null }
-$script:BrowserState = [pscustomobject]@{
-  Info = $script:BrowserInfo
-  Name = $script:BrowserName
-  InstanceArgs = $script:BrowserInstanceArgs
-  SessionOpened = $false
-}
+$script:BrowserState = Get-HMDBrowserState
+$script:BrowserInfo = $script:BrowserState.Info
+$script:BrowserName = $script:BrowserState.Name
+$script:BrowserInstanceArgs = $script:BrowserState.InstanceArgs
 if ($script:BrowserInfo) {
   Add-LogBuffer ("Default browser: {0}" -f $script:BrowserName)
   if ($script:BrowserInstanceArgs) {
@@ -812,7 +733,7 @@ $form.Add_Shown({
     NoFileTimeoutSec = $NoFileTimeoutSec
     MinStableAgeMs = $MinStableAgeMs
     BrowserState = $script:BrowserState
-    BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-BrowserArguments $browserArgs $url $prefixArgs }
+    BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-HMDBrowserArguments $browserArgs $url $prefixArgs }
     OnLog = { param($msg, $level)
       Add-Log $msg $level
       if ($msg -like "Opening:*") { Set-Status $msg }
@@ -910,7 +831,7 @@ $form.Add_Shown({
   Add-Log "Done." "success"
   if ($script:BrowserName -ieq "firefox" -and $script:BrowserState.SessionOpened) {
     Add-Log "Closing Firefox download window..."
-    Stop-FirefoxWindow
+    Stop-HMDFirefoxWindow
   }
   Add-Log "Updating AMMAP save..."
   Set-AmmapSave

@@ -118,33 +118,6 @@ function Get-DefaultBrowserInfo {
   return $parsed
 }
 
-function Open-UrlInDefaultBrowser([string]$url) {
-  if ($script:BrowserInfo -and (Test-Path -LiteralPath $script:BrowserInfo.Exe)) {
-    if ($script:BrowserName -ieq "firefox") {
-      if (-not $script:BrowserSessionOpened) {
-        Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-window", $url) | Out-Null
-        Add-Log "Opened new Firefox window for downloads."
-      } else {
-        Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList @("-new-tab", $url) | Out-Null
-        Add-Log "Opened new Firefox tab."
-      }
-      $script:BrowserSessionOpened = $true
-    } else {
-      $prefixArgs = if ($script:BrowserSessionOpened) { $null } else { $script:BrowserInstanceArgs }
-      $browserLaunchArgs = New-BrowserArguments $script:BrowserInfo.Args $url $prefixArgs
-      Start-Process -FilePath $script:BrowserInfo.Exe -ArgumentList $browserLaunchArgs | Out-Null
-      if (-not $script:BrowserSessionOpened) {
-        Add-Log "Opened new browser window for downloads."
-      } else {
-        Add-Log "Opened browser tab (best-effort)."
-      }
-      $script:BrowserSessionOpened = $true
-    }
-  } else {
-    Start-Process $url | Out-Null
-  }
-}
-
 function ConvertFrom-CurseForgeUrl([string]$url) {
   return ConvertFrom-HMDCurseForgeUrl $url
 }
@@ -382,104 +355,6 @@ function Set-AmmapSave {
   }
 }
 
-function Get-DownloadSnapshot {
-  Get-ChildItem -LiteralPath $DownloadDir -File |
-    Select-Object FullName, Name, Length, LastWriteTime
-}
-
-function Test-FileUnlocked([string]$path, [int]$timeoutSec) {
-  Add-Log ("Checking file lock: {0}" -f $path)
-  $sw = [Diagnostics.Stopwatch]::StartNew()
-  while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
-    if ($script:Abort) { return $false }
-    try {
-      $fs = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-      $fs.Close()
-      return $true
-    } catch {
-      Start-Sleep -Milliseconds $PollMs
-      [System.Windows.Forms.Application]::DoEvents()
-    }
-  }
-  Add-Log ("File still locked after timeout: {0}" -f $path) "warn"
-  return $false
-}
-
-function Get-NewCompletedDownload($beforeSnapshot) {
-  $before = @{}
-  foreach ($f in $beforeSnapshot) { $before[$f.FullName] = $true }
-  $loggedCandidates = @{}
-  $loggedZero = @{}
-  $sawAnyNew = $false
-
-  $sw = [Diagnostics.Stopwatch]::StartNew()
-  while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
-    Start-Sleep -Milliseconds $PollMs
-    [System.Windows.Forms.Application]::DoEvents()
-    if ($script:Abort) { return $null }
-
-    # New files (not present before)
-    $current = Get-ChildItem -LiteralPath $DownloadDir -File
-    $newFiles = $current | Where-Object { -not $before.ContainsKey($_.FullName) }
-    if ($newFiles.Count -gt 0) { $sawAnyNew = $true }
-    if (-not $sawAnyNew -and $sw.Elapsed.TotalSeconds -ge $NoFileTimeoutSec) {
-      Add-Log ("No download detected within {0}s; skipping." -f $NoFileTimeoutSec) "warn"
-      return $null
-    }
-
-    # If Firefox is still downloading, it often leaves a *.part file behind.
-    # Wait until we see at least one new NON-.part file and no matching .part alongside it.
-    foreach ($f in $newFiles) {
-      if ($f.Extension -in @(".part", ".crdownload", ".tmp", ".partial", ".download")) { continue }
-      if ($f.Length -le 0) {
-        if (-not $loggedZero.ContainsKey($f.FullName)) {
-          Add-Log ("Detected zero-byte file, waiting: {0}" -f $f.FullName) "warn"
-          $loggedZero[$f.FullName] = $true
-        }
-        continue
-      }
-      if (-not $loggedCandidates.ContainsKey($f.FullName)) {
-        Add-Log ("Detected new file: {0}" -f $f.FullName)
-        $loggedCandidates[$f.FullName] = $true
-      }
-
-      $partPath = $f.FullName + ".part"
-      $hasPart = Test-Path -LiteralPath $partPath
-
-      if (-not $hasPart) {
-        # Extra safety: wait until size stabilizes across ten polls
-        Add-Log ("Checking stability: {0}" -f $f.FullName)
-        $stable = $true
-        $prevSize = $null
-        for ($i = 0; $i -lt 10; $i++) {
-          $fi = Get-Item -LiteralPath $f.FullName -ErrorAction SilentlyContinue
-          if (-not $fi) { $stable = $false; break }
-          if ($i -eq 0) {
-            $prevSize = $fi.Length
-          } elseif ($fi.Length -ne $prevSize) {
-            $stable = $false
-            break
-          }
-          Start-Sleep -Milliseconds $PollMs
-          [System.Windows.Forms.Application]::DoEvents()
-          if ($script:Abort) { return $null }
-        }
-        if ($stable) {
-          Add-Log ("Size stable: {0}" -f $f.FullName)
-          $ageMs = ((Get-Date) - $f.LastWriteTime).TotalMilliseconds
-          if ($ageMs -lt $MinStableAgeMs) { continue }
-          $remaining = [Math]::Max(1, [int][Math]::Ceiling($TimeoutSec - $sw.Elapsed.TotalSeconds))
-          if (Test-FileUnlocked $f.FullName $remaining) {
-            return $f.FullName
-          }
-        }
-      }
-    }
-  }
-
-  return $null
-}
-
 function Stop-FirefoxWindow {
   # Best-effort: bring Firefox to front and send Ctrl+Shift+W (close window)
   try {
@@ -495,7 +370,6 @@ function Stop-FirefoxWindow {
 $script:BrowserInfo = Get-DefaultBrowserInfo
 $script:BrowserName = if ($script:BrowserInfo) { [IO.Path]::GetFileNameWithoutExtension($script:BrowserInfo.Exe) } else { "default browser" }
 $script:BrowserInstanceArgs = if ($script:BrowserInfo) { Get-BrowserInstanceArgs $script:BrowserInfo.Exe } else { $null }
-$script:BrowserSessionOpened = $false
 $script:BrowserState = [pscustomobject]@{
   Info = $script:BrowserInfo
   Name = $script:BrowserName
@@ -859,7 +733,7 @@ function Get-UrlsToDownload([string[]]$inputUrls, [ref]$completedRef) {
   return ,$out
 }
 
-function Process-DownloadResults([object[]]$results) {
+function Invoke-HMDDownloadResults([object[]]$results) {
   $failed = @()
   foreach ($result in $results) {
     if ($script:Abort) { break }
@@ -965,7 +839,7 @@ $form.Add_Shown({
   $completed += $downloadResults.Count
   Set-Progress $completed
 
-  $failedDownloads = Process-DownloadResults $downloadResults
+  $failedDownloads = Invoke-HMDDownloadResults $downloadResults
 
   if ($failedDownloads.Count -gt 0 -and -not $script:Abort) {
     $owner = $script:MainForm
@@ -1015,7 +889,7 @@ $form.Add_Shown({
           $retryResults = Invoke-HMDDownloads $retryUrlsToDownload $downloadOptions
           $completed += $retryResults.Count
           Set-Progress $completed
-          $retryFailed = Process-DownloadResults $retryResults
+          $retryFailed = Invoke-HMDDownloadResults $retryResults
           $retrySuccessCount = @($retryResults | Where-Object { $_.status -eq "success" }).Count
           $retryFailCount = $retryFailed.Count
           $retryLevel = if ($retryFailCount -eq 0) { "success" } else { "warn" }

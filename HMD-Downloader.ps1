@@ -61,7 +61,7 @@ function Get-HMDNewCompletedDownload {
 
     $current = Get-ChildItem -LiteralPath $downloadDir -File
     $newFiles = $current | Where-Object { -not $before.ContainsKey($_.FullName) }
-    if ($newFiles.Count -gt 0) { $sawAnyNew = $true }
+    if (@($newFiles).Count -gt 0) { $sawAnyNew = $true }
     if (-not $sawAnyNew -and $sw.Elapsed.TotalSeconds -ge $noFileTimeoutSec) {
       if ($onLog) { & $onLog ("No download detected within {0}s; skipping." -f $noFileTimeoutSec) "warn" }
       return [pscustomobject]@{ Path = $null; Reason = "no-file-timeout" }
@@ -126,8 +126,8 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
       $browser.SessionOpened = $true
     } else {
       $prefixArgs = if ($browser.SessionOpened) { $null } else { $browser.InstanceArgs }
-      $args = $options.BuildBrowserArguments.Invoke($browser.Info.Args, $url, $prefixArgs)
-      Start-Process -FilePath $browser.Info.Exe -ArgumentList $args | Out-Null
+      $launchArgs = $options.BuildBrowserArguments.Invoke($browser.Info.Args, $url, $prefixArgs)
+      Start-Process -FilePath $browser.Info.Exe -ArgumentList $launchArgs | Out-Null
       $browser.SessionOpened = $true
     }
   } else {

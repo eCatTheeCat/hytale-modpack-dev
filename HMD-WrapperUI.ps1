@@ -44,6 +44,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot "HMD-Browser.ps1")
 . (Join-Path $PSScriptRoot "HMD-SaveHandler.ps1")
 . (Join-Path $PSScriptRoot "HMD-Ui.ps1")
+. (Join-Path $PSScriptRoot "HMD-DownloadOrchestrator.ps1")
 
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[object]
@@ -57,17 +58,6 @@ function Add-LogBuffer([string]$text, [string]$level = "info") {
 }
 
 Add-LogBuffer "Script started."
-
-function ConvertFrom-CurseForgeUrl([string]$url) {
-  return ConvertFrom-HMDCurseForgeUrl $url
-}
-
-function Get-LatestCurseForgeUrl([string]$url) {
-  $pattern = '^https?://www\.curseforge\.com/([^/]+)/mods/([^/]+)/download(?:/(\d+))?/?'
-  $m = [regex]::Match($url, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-  if (-not $m.Success) { return $null }
-  return ("https://www.curseforge.com/{0}/mods/{1}/download/" -f $m.Groups[1].Value, $m.Groups[2].Value)
-}
 
 $UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg $level }
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
@@ -148,141 +138,6 @@ function Set-Progress([int]$value) {
   Set-HMDProgress $script:Ui $value
 }
 
-function Get-UrlsToDownload([string[]]$inputUrls, [ref]$completedRef) {
-  $out = @()
-  foreach ($url in $inputUrls) {
-    if ($script:Abort) { break }
-    $cfInfo = ConvertFrom-CurseForgeUrl $url
-    $skipEntry = $null
-    $skipReason = $null
-
-    if ($cfInfo) {
-      if ($cfInfo.FileId) {
-        Add-Log ("Parsed CurseForge URL: fileId={0}, mod={1}" -f $cfInfo.FileId, $cfInfo.ModSlug)
-        $existingEntry = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.fileId -eq $cfInfo.FileId } |
-          Select-Object -First 1
-        if ($existingEntry -and $existingEntry.fileName) {
-          $existingPath = Join-Path $DestDir $existingEntry.fileName
-          if (Test-Path -LiteralPath $existingPath) {
-            $skipEntry = $existingEntry
-            $skipReason = "fileId"
-          }
-        }
-      } else {
-        Add-Log ("Parsed CurseForge URL: mod={0} (latest)" -f $cfInfo.ModSlug)
-        $existingEntries = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.modSlug -eq $cfInfo.ModSlug }
-        $sawExistingFile = $false
-        foreach ($entry in $existingEntries) {
-          if (-not $entry.fileName) { continue }
-          $existingPath = Join-Path $DestDir $entry.fileName
-          if (-not (Test-Path -LiteralPath $existingPath)) { continue }
-          $sawExistingFile = $true
-          $currentHash = Get-HMDFileHash $existingPath
-          if (-not $currentHash) { continue }
-          if ($entry.sha256 -and $entry.sha256 -eq $currentHash) {
-            $skipEntry = $entry
-            $skipReason = "latest-hash"
-            break
-          }
-          if (-not $entry.sha256) {
-            $entry.sha256 = $currentHash
-            $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
-            Set-HMDIndex $InstallIndexFile $script:InstallIndex
-            Add-Log ("Backfilled sha256 for {0}" -f $entry.fileName)
-            $skipEntry = $entry
-            $skipReason = "latest-backfill"
-            break
-          }
-        }
-        if (-not $skipEntry -and $sawExistingFile) {
-          Add-Log ("Existing mod found for {0}, but hash mismatch; will re-download." -f $cfInfo.ModSlug) "warn"
-        }
-      }
-    } else {
-      Add-Log "URL not recognized as CurseForge format."
-    }
-
-    if ($skipEntry) {
-      Set-Status ("Already installed: {0}" -f $skipEntry.fileName)
-      if ($skipReason -eq "fileId") {
-        Add-Log ("Skipping already installed fileId {0}: {1}" -f $cfInfo.FileId, $skipEntry.fileName)
-      } else {
-        Add-Log ("Skipping already installed latest for mod {0}: {1}" -f $cfInfo.ModSlug, $skipEntry.fileName)
-      }
-      $completedRef.Value++
-      Set-Progress $completedRef.Value
-      continue
-    }
-
-    $out += $url
-  }
-  return ,$out
-}
-
-function Invoke-HMDDownloadResults([object[]]$results) {
-  $failed = @()
-  foreach ($result in $results) {
-    if ($script:Abort) { break }
-    if ($result.status -ne "success" -or -not $result.destPath) {
-      Add-Log ("Download failed for {0} ({1})" -f $result.url, $result.reason) "warn"
-      $failed += $result
-      continue
-    }
-
-    $dest = $result.destPath
-    Add-Log ("Reading manifest: {0}" -f $dest)
-    $manifestInfo = Get-HMDModManifestInfo -filePath $dest -onLog ${function:Add-Log}
-    $modName = $null
-    $modVersion = $null
-    if ($manifestInfo) {
-      $modName = $manifestInfo.Name
-      $modVersion = $manifestInfo.Version
-      Add-Log ("Manifest: name={0}, version={1}" -f $modName, $modVersion)
-    } else {
-      Add-Log "Manifest info missing; recording file without name/version." "warn"
-    }
-
-    $cfInfo = ConvertFrom-CurseForgeUrl $result.url
-    $fileId = if ($cfInfo) { $cfInfo.FileId } else { $null }
-    $game = if ($cfInfo) { $cfInfo.Game } else { $null }
-    $modSlug = if ($cfInfo) { $cfInfo.ModSlug } else { $null }
-    $fileName = [IO.Path]::GetFileName($dest)
-    $sha256 = Get-HMDFileHash $dest
-
-    if ($modName -and $modVersion) {
-      $oldEntries = Find-HMDIndexEntries $script:InstallIndex { param($m) $m.modName -eq $modName -and $m.version -ne $modVersion }
-      foreach ($old in $oldEntries) {
-        if ($old.fileName) {
-          $oldPath = Join-Path $DestDir $old.fileName
-          if (Test-Path -LiteralPath $oldPath) {
-            Remove-Item -LiteralPath $oldPath -Force
-            Add-Log ("Removed old version: {0}" -f $old.fileName)
-          }
-        }
-      }
-      $script:InstallIndex = Remove-HMDIndexEntries $script:InstallIndex { param($m) $m.modName -eq $modName -and $m.version -ne $modVersion }
-    }
-
-    $entry = [ordered]@{
-      fileId = $fileId
-      modName = $modName
-      version = $modVersion
-      fileName = $fileName
-      url = $result.url
-      sourceType = if ($fileId) { "fileId" } else { "latest" }
-      sourceUrl = $result.url
-      game = $game
-      modSlug = $modSlug
-      sha256 = $sha256
-      installedAt = (Get-Date).ToString("s")
-    }
-    $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
-    Set-HMDIndex $InstallIndexFile $script:InstallIndex
-    Add-Log ("Updated install index: {0}" -f $InstallIndexFile) "success"
-  }
-  return ,$failed
-}
-
 $script:Ui.Form.Add_Shown({
   if ($total -eq 0) {
     if ($script:LinksFileMissing) {
@@ -296,7 +151,11 @@ $script:Ui.Form.Add_Shown({
   }
 
   $completed = 0
-  $urlsToDownload = Get-UrlsToDownload $urls ([ref]$completed)
+  $urlResult = Get-HMDUrlsToDownload -inputUrls $urls -completedRef ([ref]$completed) -installIndex $script:InstallIndex `
+    -destDir $DestDir -installIndexFile $InstallIndexFile -onLog ${function:Add-Log} -onStatus ${function:Set-Status} `
+    -onProgress ${function:Set-Progress} -abortFlag { return $script:Abort }
+  $script:InstallIndex = $urlResult.InstallIndex
+  $urlsToDownload = $urlResult.Urls
 
   $downloadOptions = @{
     DownloadDir = $DownloadDir
@@ -325,7 +184,10 @@ $script:Ui.Form.Add_Shown({
   $completed += $downloadResults.Count
   Set-Progress $completed
 
-  $failedDownloads = Invoke-HMDDownloadResults $downloadResults
+  $processResult = Invoke-HMDDownloadResults -results $downloadResults -installIndex $script:InstallIndex -destDir $DestDir `
+    -installIndexFile $InstallIndexFile -onLog ${function:Add-Log} -abortFlag { return $script:Abort }
+  $script:InstallIndex = $processResult.InstallIndex
+  $failedDownloads = $processResult.Failed
 
   if ($failedDownloads.Count -gt 0 -and -not $script:Abort) {
     $owner = $script:MainForm
@@ -355,7 +217,7 @@ $script:Ui.Form.Add_Shown({
     if ($retryChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
       $retryUrls = @()
       foreach ($fail in $failedDownloads) {
-        $latestUrl = Get-LatestCurseForgeUrl $fail.url
+        $latestUrl = Get-HMDLatestCurseForgeUrl $fail.url
         if ($latestUrl) {
           $retryUrls += $latestUrl
         } else {
@@ -370,12 +232,19 @@ $script:Ui.Form.Add_Shown({
         $script:Ui.ProgressMax = [Math]::Max(1, $script:Ui.ProgressMax + $retryUrls.Count)
         Set-Progress $completed
 
-        $retryUrlsToDownload = Get-UrlsToDownload $retryUrls ([ref]$completed)
+        $retryUrlResult = Get-HMDUrlsToDownload -inputUrls $retryUrls -completedRef ([ref]$completed) -installIndex $script:InstallIndex `
+          -destDir $DestDir -installIndexFile $InstallIndexFile -onLog ${function:Add-Log} -onStatus ${function:Set-Status} `
+          -onProgress ${function:Set-Progress} -abortFlag { return $script:Abort }
+        $script:InstallIndex = $retryUrlResult.InstallIndex
+        $retryUrlsToDownload = $retryUrlResult.Urls
         if ($retryUrlsToDownload.Count -gt 0 -and -not $script:Abort) {
           $retryResults = Invoke-HMDDownloads $retryUrlsToDownload $downloadOptions
           $completed += $retryResults.Count
           Set-Progress $completed
-          $retryFailed = Invoke-HMDDownloadResults $retryResults
+          $retryProcess = Invoke-HMDDownloadResults -results $retryResults -installIndex $script:InstallIndex -destDir $DestDir `
+            -installIndexFile $InstallIndexFile -onLog ${function:Add-Log} -abortFlag { return $script:Abort }
+          $script:InstallIndex = $retryProcess.InstallIndex
+          $retryFailed = $retryProcess.Failed
           $retrySuccessCount = @($retryResults | Where-Object { $_.status -eq "success" }).Count
           $retryFailCount = $retryFailed.Count
           $retryLevel = if ($retryFailCount -eq 0) { "success" } else { "warn" }

@@ -123,11 +123,19 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
   if ($browser -and $browser.Info -and (Test-Path -LiteralPath $browser.Info.Exe)) {
     if ($browser.Name -ieq "firefox") {
       if (-not $browser.SessionOpened) {
-        Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", $url) | Out-Null
+        $firefoxRunning = @(Get-Process -Name "firefox" -ErrorAction SilentlyContinue).Count -gt 0
+        if ($firefoxRunning) {
+          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", "about:blank") | Out-Null
+          $browser.SessionOpened = $true
+          Start-Sleep -Milliseconds 200
+          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-tab", $url) | Out-Null
+        } else {
+          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", $url) | Out-Null
+          $browser.SessionOpened = $true
+        }
       } else {
         Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-tab", $url) | Out-Null
       }
-      $browser.SessionOpened = $true
     } else {
       $prefixArgs = if ($browser.SessionOpened) { $null } else { $browser.InstanceArgs }
       $launchArgs = $options.BuildBrowserArguments.Invoke($browser.Info.Args, $url, $prefixArgs)

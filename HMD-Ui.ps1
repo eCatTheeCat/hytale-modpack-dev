@@ -138,10 +138,10 @@ function New-HMDUi {
   $layout.RowCount = 4
   $layout.Padding = New-Object System.Windows.Forms.Padding(12)
   $layout.BackColor = $colors.Bg
-  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null
+  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null
+  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100))) | Out-Null
+  $layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize))) | Out-Null
 
   $statusLabel = New-Object System.Windows.Forms.Label
   $statusLabel.AutoSize = $false
@@ -183,11 +183,11 @@ function New-HMDUi {
     }
 
     $pct = "{0}%" -f [int]$ui.ProgressPercent
-    $textSize = $g.MeasureString($pct, $form.Font)
+    $textSize = $g.MeasureString($pct, $panel.Font)
     $tx = ($rect.Width - $textSize.Width) / 2
     $ty = ($rect.Height - $textSize.Height) / 2
     $textBrush = New-Object System.Drawing.SolidBrush($ui.Colors.Fg)
-    $g.DrawString($pct, $form.Font, $textBrush, $tx, $ty)
+    $g.DrawString($pct, $panel.Font, $textBrush, $tx, $ty)
     $textBrush.Dispose()
   })
 
@@ -247,8 +247,9 @@ function New-HMDUi {
   $abortButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
   $abortButton.FlatAppearance.BorderColor = $colors.ButtonBorder
   $abortButton.FlatAppearance.BorderSize = 1
+  $ui | Add-Member -NotePropertyName AbortHandler -NotePropertyValue $onAbort
   $abortButton.Add_Click({
-    if ($onAbort) { & $onAbort $ui }
+    if ($ui.AbortHandler) { & $ui.AbortHandler $ui }
   })
 
   $buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -262,7 +263,7 @@ function New-HMDUi {
   $buttonPanel.Controls.Add($abortButton)
 
   $form.Add_FormClosing({
-    if ($onAbort) { & $onAbort $ui }
+    if ($ui.AbortHandler) { & $ui.AbortHandler $ui }
   })
 
   $layout.Controls.Add($statusLabel, 0, 0) | Out-Null

@@ -177,11 +177,11 @@ $script:Ui.Form.Add_Shown({
   }
 
   $downloadResults = @()
-  if ($urlsToDownload.Count -gt 0 -and -not $script:Abort) {
+  if (@($urlsToDownload).Count -gt 0 -and -not $script:Abort) {
     $downloadResults = Invoke-HMDDownloads $urlsToDownload $downloadOptions
   }
 
-  $completed += $downloadResults.Count
+  $completed += @($downloadResults).Count
   Set-Progress $completed
 
   $processResult = Invoke-HMDDownloadResults -results $downloadResults -installIndex $script:InstallIndex -destDir $DestDir `
@@ -189,7 +189,7 @@ $script:Ui.Form.Add_Shown({
   $script:InstallIndex = $processResult.InstallIndex
   $failedDownloads = $processResult.Failed
 
-  if ($failedDownloads.Count -gt 0 -and -not $script:Abort) {
+  if (@($failedDownloads).Count -gt 0 -and -not $script:Abort) {
     $owner = $script:MainForm
     if ($owner) {
       $owner.TopMost = $true
@@ -226,10 +226,11 @@ $script:Ui.Form.Add_Shown({
       }
       $retryUrls = $retryUrls | Sort-Object -Unique
 
-      if ($retryUrls.Count -gt 0) {
-        Add-Log ("Retrying failed downloads using latest links: {0}" -f $retryUrls.Count) "warn"
-        Set-Status ("Retrying {0} downloads..." -f $retryUrls.Count)
-        $script:Ui.ProgressMax = [Math]::Max(1, $script:Ui.ProgressMax + $retryUrls.Count)
+      if (@($retryUrls).Count -gt 0) {
+        $retryUrlCount = @($retryUrls).Count
+        Add-Log ("Retrying failed downloads using latest links: {0}" -f $retryUrlCount) "warn"
+        Set-Status ("Retrying {0} downloads..." -f $retryUrlCount)
+        $script:Ui.ProgressMax = [Math]::Max(1, $script:Ui.ProgressMax + $retryUrlCount)
         Set-Progress $completed
 
         $retryUrlResult = Get-HMDUrlsToDownload -inputUrls $retryUrls -completedRef ([ref]$completed) -installIndex $script:InstallIndex `
@@ -237,20 +238,20 @@ $script:Ui.Form.Add_Shown({
           -onProgress ${function:Set-Progress} -abortFlag { return $script:Abort }
         $script:InstallIndex = $retryUrlResult.InstallIndex
         $retryUrlsToDownload = $retryUrlResult.Urls
-        if ($retryUrlsToDownload.Count -gt 0 -and -not $script:Abort) {
+        if (@($retryUrlsToDownload).Count -gt 0 -and -not $script:Abort) {
           $retryResults = Invoke-HMDDownloads $retryUrlsToDownload $downloadOptions
-          $completed += $retryResults.Count
+          $completed += @($retryResults).Count
           Set-Progress $completed
           $retryProcess = Invoke-HMDDownloadResults -results $retryResults -installIndex $script:InstallIndex -destDir $DestDir `
             -installIndexFile $InstallIndexFile -onLog ${function:Add-Log} -abortFlag { return $script:Abort }
           $script:InstallIndex = $retryProcess.InstallIndex
           $retryFailed = $retryProcess.Failed
           $retrySuccessCount = @($retryResults | Where-Object { $_.status -eq "success" }).Count
-          $retryFailCount = $retryFailed.Count
+          $retryFailCount = @($retryFailed).Count
           $retryLevel = if ($retryFailCount -eq 0) { "success" } else { "warn" }
           Add-Log ("Retry results: {0} succeeded, {1} failed." -f $retrySuccessCount, $retryFailCount) $retryLevel
-          if ($retryFailed.Count -gt 0) {
-            Add-Log ("Some downloads still failed after retry: {0}" -f $retryFailed.Count) "warn"
+          if (@($retryFailed).Count -gt 0) {
+            Add-Log ("Some downloads still failed after retry: {0}" -f @($retryFailed).Count) "warn"
           }
         } else {
           Add-Log "No retry downloads needed after filtering." "warn"

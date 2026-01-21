@@ -115,6 +115,10 @@ function Get-HMDNewCompletedDownload {
 }
 
 function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
+  if ([string]::IsNullOrWhiteSpace($url)) {
+    if ($options.OnLog) { & $options.OnLog "Skipped empty URL." "warn" }
+    return
+  }
   $browser = $options.BrowserState
   if ($browser -and $browser.Info -and (Test-Path -LiteralPath $browser.Info.Exe)) {
     if ($browser.Name -ieq "firefox") {
@@ -127,6 +131,10 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
     } else {
       $prefixArgs = if ($browser.SessionOpened) { $null } else { $browser.InstanceArgs }
       $launchArgs = $options.BuildBrowserArguments.Invoke($browser.Info.Args, $url, $prefixArgs)
+      if ([string]::IsNullOrWhiteSpace($launchArgs)) {
+        if ($options.OnLog) { & $options.OnLog "Browser args empty; skipping open." "warn" }
+        return
+      }
       Start-Process -FilePath $browser.Info.Exe -ArgumentList $launchArgs | Out-Null
       $browser.SessionOpened = $true
     }

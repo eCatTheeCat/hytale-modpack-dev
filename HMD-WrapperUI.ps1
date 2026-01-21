@@ -42,6 +42,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot "HMD-IndexHandler.ps1")
 . (Join-Path $PSScriptRoot "HMD-Downloader.ps1")
 . (Join-Path $PSScriptRoot "HMD-Browser.ps1")
+. (Join-Path $PSScriptRoot "HMD-SaveHandler.ps1")
 
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[object]
@@ -138,42 +139,7 @@ function Get-ModManifestInfo([string]$filePath) {
   }
 }
 
-function Get-HytaleUserDataDir {
-  $defaultRoot = Join-Path $env:APPDATA "Hytale"
-  Add-LogBuffer ("Checking default Hytale install at: {0}" -f $defaultRoot)
-  if (Test-Path -LiteralPath $defaultRoot) {
-    Add-LogBuffer "Found default Hytale install."
-    $root = $defaultRoot
-  } else {
-    Add-LogBuffer "Default install not found; prompting for location."
-    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "Select your Hytale install folder"
-    $dialog.ShowNewFolderButton = $false
-    $result = $dialog.ShowDialog()
-    if ($result -ne [System.Windows.Forms.DialogResult]::OK -or
-        [string]::IsNullOrWhiteSpace($dialog.SelectedPath)) {
-      Add-LogBuffer "Install location not provided." "error"
-      return $null
-    }
-    $root = $dialog.SelectedPath
-    Add-LogBuffer ("User selected install folder: {0}" -f $root)
-  }
-
-  if ([IO.Path]::GetFileName($root) -ieq "UserData") {
-    $userData = $root
-  } else {
-    $userData = Join-Path $root "UserData"
-  }
-
-  if (!(Test-Path -LiteralPath $userData)) {
-    New-Item -ItemType Directory -Force -Path $userData | Out-Null
-    Add-LogBuffer ("Created UserData folder: {0}" -f $userData)
-  }
-
-  return $userData
-}
-
-$UserDataDir = Get-HytaleUserDataDir
+$UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg $level }
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
 Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
 
@@ -197,93 +163,7 @@ Add-LogBuffer ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
 
 $SavesDir = Join-Path $UserDataDir "Saves"
 $SaveName = "AMMAP"
-$SavePath = Join-Path $SavesDir $SaveName
 $ConfigSource = Join-Path $PSScriptRoot "AMMAP_CONFIG"
-
-function Get-BackupSavePath([string]$basePath) {
-  $dir = Split-Path -Parent $basePath
-  $base = (Split-Path -Leaf $basePath) + " old"
-  $candidate = Join-Path $dir $base
-  if (-not (Test-Path -LiteralPath $candidate)) { return $candidate }
-  $i = 1
-  do {
-    $candidate = Join-Path $dir ("{0} ({1})" -f $base, $i)
-    $i++
-  } while (Test-Path -LiteralPath $candidate)
-  return $candidate
-}
-
-function Copy-ConfigToSave([string]$sourceDir, [string]$destDir) {
-  if (!(Test-Path -LiteralPath $sourceDir)) {
-    Add-Log ("Config folder not found: {0}" -f $sourceDir) "error"
-    return $false
-  }
-  New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-  $items = Get-ChildItem -LiteralPath $sourceDir -Force
-  if (-not $items) {
-    Add-Log "AMMAP_CONFIG is empty; nothing to copy." "warn"
-    return $true
-  }
-  foreach ($item in $items) {
-    Copy-Item -LiteralPath $item.FullName -Destination $destDir -Recurse -Force
-  }
-  return $true
-}
-
-function Set-AmmapSave {
-  if (!(Test-Path -LiteralPath $SavesDir)) {
-    New-Item -ItemType Directory -Force -Path $SavesDir | Out-Null
-    Add-Log ("Created Saves folder: {0}" -f $SavesDir)
-  }
-
-  if (!(Test-Path -LiteralPath $SavePath)) {
-    Add-Log ("Save folder not found, creating: {0}" -f $SavePath)
-    if (Copy-ConfigToSave $ConfigSource $SavePath) {
-      Add-Log "Copied AMMAP_CONFIG into new save." "success"
-    }
-    return
-  }
-
-  $msg = "AMMAP save already exists.`n`nYes = Create New Save (rename existing)`nNo = Overwrite Existing Save`nCancel = Skip"
-  $owner = $script:MainForm
-  if ($owner) {
-    $owner.TopMost = $true
-    $owner.Activate()
-  }
-  $choice = if ($owner) {
-    [System.Windows.Forms.MessageBox]::Show(
-      $owner,
-      $msg,
-      "AMMAP Save",
-      [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-      [System.Windows.Forms.MessageBoxIcon]::Question
-    )
-  } else {
-    [System.Windows.Forms.MessageBox]::Show(
-      $msg,
-      "AMMAP Save",
-      [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
-      [System.Windows.Forms.MessageBoxIcon]::Question
-    )
-  }
-  if ($owner) { $owner.TopMost = $false }
-
-  if ($choice -eq [System.Windows.Forms.DialogResult]::Yes) {
-    $backupPath = Get-BackupSavePath $SavePath
-    Move-Item -LiteralPath $SavePath -Destination $backupPath
-    Add-Log ("Renamed existing save to: {0}" -f $backupPath)
-    if (Copy-ConfigToSave $ConfigSource $SavePath) {
-      Add-Log "Created new AMMAP save from AMMAP_CONFIG." "success"
-    }
-  } elseif ($choice -eq [System.Windows.Forms.DialogResult]::No) {
-    Add-Log "Overwriting existing AMMAP save with AMMAP_CONFIG contents."
-    if (Copy-ConfigToSave $ConfigSource $SavePath) {
-      Add-Log "Merged AMMAP_CONFIG into existing save." "success"
-    }
-  } else {
-    Add-Log "Save update skipped by user." "warn"
-  }
-}
 
 $script:BrowserState = Get-HMDBrowserState
 $script:BrowserInfo = $script:BrowserState.Info
@@ -834,7 +714,7 @@ $form.Add_Shown({
     Stop-HMDFirefoxWindow
   }
   Add-Log "Updating AMMAP save..."
-  Set-AmmapSave
+  Set-HMDSave -savesDir $SavesDir -saveName $SaveName -configSource $ConfigSource -owner $script:MainForm -onLog ${function:Add-Log}
   Write-Host "`nDone."
 })
 

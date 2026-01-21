@@ -229,7 +229,7 @@ $script:Ui.Form.Add_Shown({
 
     if ($retryChoice -eq [System.Windows.Forms.DialogResult]::Yes) {
       $retryUrls = @()
-      foreach ($fail in $failedDownloads) {
+      foreach ($fail in @($failedDownloads)) {
         $latestUrl = Get-HMDLatestCurseForgeUrl $fail.url
         if ($latestUrl) {
           $retryUrls += $latestUrl

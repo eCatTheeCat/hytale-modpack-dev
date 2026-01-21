@@ -92,7 +92,7 @@ function Get-HMDUrlsToDownload {
   }
 
   return [pscustomobject]@{
-    Urls = ,$out
+    Urls = @($out)
     InstallIndex = $installIndex
   }
 }
@@ -169,7 +169,7 @@ function Invoke-HMDDownloadResults {
   }
 
   return [pscustomobject]@{
-    Failed = ,$failed
+    Failed = @($failed)
     InstallIndex = $installIndex
   }
 }

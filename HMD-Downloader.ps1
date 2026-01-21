@@ -119,18 +119,12 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
     if ($options.OnLog) { & $options.OnLog "Skipped empty URL." "warn" }
     return
   }
-  $windowDelayMs = 0
-  if ($options.ContainsKey("BrowserWindowDelayMs")) {
-    $windowDelayMs = [int]$options.BrowserWindowDelayMs
-  }
   $browser = $options.BrowserState
   if ($browser -and $browser.Info -and (Test-Path -LiteralPath $browser.Info.Exe)) {
-    $wasOpened = $browser.SessionOpened
     if ($browser.Name -ieq "firefox") {
       if (-not $browser.SessionOpened) {
         Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", $url) | Out-Null
         $browser.SessionOpened = $true
-        if ($windowDelayMs -gt 0) { Start-Sleep -Milliseconds $windowDelayMs }
       } else {
         Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-tab", $url) | Out-Null
       }
@@ -143,7 +137,6 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
       }
       Start-Process -FilePath $browser.Info.Exe -ArgumentList $launchArgs | Out-Null
       $browser.SessionOpened = $true
-      if (-not $wasOpened -and $windowDelayMs -gt 0) { Start-Sleep -Milliseconds $windowDelayMs }
     }
   } else {
     Start-Process $url | Out-Null
@@ -157,6 +150,7 @@ function Invoke-HMDDownloads([string[]]$urls, [hashtable]$options) {
   $timeoutSec = $options.TimeoutSec
   $noFileTimeoutSec = $options.NoFileTimeoutSec
   $minStableAgeMs = $options.MinStableAgeMs
+  $windowDelayMs = if ($options.ContainsKey("BrowserWindowDelayMs")) { [int]$options.BrowserWindowDelayMs } else { 0 }
   $onLog = $options.OnLog
   $onProgress = $options.OnProgress
   $abortFlag = $options.AbortFlag
@@ -170,6 +164,7 @@ function Invoke-HMDDownloads([string[]]$urls, [hashtable]$options) {
     if ($onLog) { & $onLog ("Opening: {0}" -f $url) "info" }
     $before = Get-HMDDownloadSnapshot $downloadDir
     Open-HMDBrowserUrl $url $options
+    if ($windowDelayMs -gt 0) { Start-Sleep -Milliseconds $windowDelayMs }
 
     if ($onLog) { & $onLog "Waiting for download..." "info" }
     $downloadResult = Get-HMDNewCompletedDownload -beforeSnapshot $before -downloadDir $downloadDir `

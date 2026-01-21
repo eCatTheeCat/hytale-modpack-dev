@@ -1,5 +1,5 @@
-# Download-Mods.ps1
-# Reads URLs from modDownloadLinks.txt, opens each in browser, waits for a new download to complete, then moves it.
+# HMD-WrapperUI.ps1
+# Main UI wrapper for HMD installer.
 
 # Ensure WinForms runs in STA (pwsh defaults to MTA, which can prevent UI from showing).
 if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
@@ -129,14 +129,6 @@ function Get-LatestCurseForgeUrl([string]$url) {
   return ("https://www.curseforge.com/{0}/mods/{1}/download/" -f $m.Groups[1].Value, $m.Groups[2].Value)
 }
 
-function Get-InstallIndex([string]$path) {
-  return Get-HMDIndex $path
-}
-
-function Set-InstallIndex([string]$path, $data) {
-  Set-HMDIndex $path $data
-}
-
 function Get-ManifestFieldValue([string]$text, [string]$key) {
   $k = [regex]::Escape($key)
   $patterns = @(
@@ -262,7 +254,7 @@ if (!(Test-Path $LinksFile)) {
 New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 Add-LogBuffer ("Ensured Mods folder exists: {0}" -f $DestDir)
 
-$script:InstallIndex = Get-InstallIndex $InstallIndexFile
+$script:InstallIndex = Get-HMDIndex $InstallIndexFile
 Add-LogBuffer ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
 
 $SavesDir = Join-Path $UserDataDir "Saves"
@@ -701,7 +693,7 @@ function Get-UrlsToDownload([string[]]$inputUrls, [ref]$completedRef) {
           if (-not $entry.sha256) {
             $entry.sha256 = $currentHash
             $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
-            Set-InstallIndex $InstallIndexFile $script:InstallIndex
+            Set-HMDIndex $InstallIndexFile $script:InstallIndex
             Add-Log ("Backfilled sha256 for {0}" -f $entry.fileName)
             $skipEntry = $entry
             $skipReason = "latest-backfill"
@@ -791,7 +783,7 @@ function Invoke-HMDDownloadResults([object[]]$results) {
       installedAt = (Get-Date).ToString("s")
     }
     $script:InstallIndex = Update-HMDIndex $script:InstallIndex $entry
-    Set-InstallIndex $InstallIndexFile $script:InstallIndex
+    Set-HMDIndex $InstallIndexFile $script:InstallIndex
     Add-Log ("Updated install index: {0}" -f $InstallIndexFile) "success"
   }
   return ,$failed

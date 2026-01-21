@@ -11,6 +11,7 @@ function Get-HMDDefaults {
     ModsDirName = "Mods"
     LinksFileName = "modDownloadLinks.txt"
     DownloadDir = (Join-Path $env:USERPROFILE "Downloads")
+    BrowserWindowDelayMs = 400
     PollMs = 50
     TimeoutSec = 180
     MinStableAgeMs = 1000

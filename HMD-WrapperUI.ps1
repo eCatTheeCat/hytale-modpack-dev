@@ -176,6 +176,7 @@ $script:Ui.Form.Add_Shown({
     TimeoutSec = $TimeoutSec
     NoFileTimeoutSec = $NoFileTimeoutSec
     MinStableAgeMs = $MinStableAgeMs
+    BrowserWindowDelayMs = $script:Config.BrowserWindowDelayMs
     BrowserState = $script:BrowserState
     BuildBrowserArguments = { param($browserArgs, $url, $prefixArgs) New-HMDBrowserArguments $browserArgs $url $prefixArgs }
     OnLog = { param($msg, $level)

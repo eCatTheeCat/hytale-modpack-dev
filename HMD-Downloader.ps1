@@ -119,20 +119,18 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
     if ($options.OnLog) { & $options.OnLog "Skipped empty URL." "warn" }
     return
   }
+  $windowDelayMs = 0
+  if ($options.ContainsKey("BrowserWindowDelayMs")) {
+    $windowDelayMs = [int]$options.BrowserWindowDelayMs
+  }
   $browser = $options.BrowserState
   if ($browser -and $browser.Info -and (Test-Path -LiteralPath $browser.Info.Exe)) {
+    $wasOpened = $browser.SessionOpened
     if ($browser.Name -ieq "firefox") {
       if (-not $browser.SessionOpened) {
-        $firefoxRunning = @(Get-Process -Name "firefox" -ErrorAction SilentlyContinue).Count -gt 0
-        if ($firefoxRunning) {
-          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", "about:blank") | Out-Null
-          $browser.SessionOpened = $true
-          Start-Sleep -Milliseconds 200
-          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-tab", $url) | Out-Null
-        } else {
-          Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", $url) | Out-Null
-          $browser.SessionOpened = $true
-        }
+        Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-window", $url) | Out-Null
+        $browser.SessionOpened = $true
+        if ($windowDelayMs -gt 0) { Start-Sleep -Milliseconds $windowDelayMs }
       } else {
         Start-Process -FilePath $browser.Info.Exe -ArgumentList @("-new-tab", $url) | Out-Null
       }
@@ -145,6 +143,7 @@ function Open-HMDBrowserUrl([string]$url, [hashtable]$options) {
       }
       Start-Process -FilePath $browser.Info.Exe -ArgumentList $launchArgs | Out-Null
       $browser.SessionOpened = $true
+      if (-not $wasOpened -and $windowDelayMs -gt 0) { Start-Sleep -Milliseconds $windowDelayMs }
     }
   } else {
     Start-Process $url | Out-Null

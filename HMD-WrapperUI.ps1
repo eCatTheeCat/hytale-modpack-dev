@@ -43,6 +43,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot "HMD-Downloader.ps1")
 . (Join-Path $PSScriptRoot "HMD-Browser.ps1")
 . (Join-Path $PSScriptRoot "HMD-SaveHandler.ps1")
+. (Join-Path $PSScriptRoot "HMD-Ui.ps1")
 
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[object]
@@ -196,263 +197,26 @@ $urls = if ($script:LinksFileMissing) {
 }
 
 $total = $urls.Count
-
-$uiBg = [System.Drawing.Color]::FromArgb(22, 22, 22)
-$uiPanelBg = [System.Drawing.Color]::FromArgb(30, 30, 30)
-$uiLogBg = [System.Drawing.Color]::FromArgb(26, 26, 26)
-$uiFg = [System.Drawing.Color]::Gainsboro
-$uiSelectBg = [System.Drawing.Color]::FromArgb(45, 45, 45)
-$uiButtonBg = [System.Drawing.Color]::FromArgb(45, 45, 45)
-$uiButtonBorder = [System.Drawing.Color]::FromArgb(70, 70, 70)
-$uiWarn = [System.Drawing.Color]::Gold
-$uiError = [System.Drawing.Color]::Tomato
-$uiSuccess = [System.Drawing.Color]::LimeGreen
-
-$form = New-Object System.Windows.Forms.Form
-$form.Text = "AMMAP Installer"
-$form.FormBorderStyle = "SizableToolWindow"
-$form.StartPosition = "Manual"
-$form.Size = New-Object System.Drawing.Size(520, 340)
-$form.MinimumSize = New-Object System.Drawing.Size(420, 260)
-$form.BackColor = $uiBg
-$script:MainForm = $form
-
-$screen = [System.Windows.Forms.Screen]::PrimaryScreen
-if (-not $screen) {
-  $screen = [System.Windows.Forms.Screen]::AllScreens | Select-Object -First 1
-}
-$wa = $screen.WorkingArea
-if ($wa -is [System.Array]) {
-  $wa = $wa | Select-Object -First 1
-}
-$margin = 12
-$x = [int]$wa.Right - [int]$form.Width - $margin
-$y = [int]$wa.Bottom - [int]$form.Height - $margin
-$form.Location = New-Object System.Drawing.Point($x, $y)
-
-$layout = New-Object System.Windows.Forms.TableLayoutPanel
-$layout.Dock = [System.Windows.Forms.DockStyle]::Fill
-$layout.ColumnCount = 1
-$layout.RowCount = 4
-$layout.Padding = New-Object System.Windows.Forms.Padding(12)
-$layout.BackColor = $uiBg
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-$layout.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.AutoSize = $false
-$statusLabel.Text = "Ready."
-$statusLabel.Height = 40
-$statusLabel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$statusLabel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
-$statusLabel.BackColor = $uiBg
-$statusLabel.ForeColor = $uiFg
-
-function New-ColorFromHue([double]$h) {
-  $h = $h % 1
-  if ($h -lt 0) { $h += 1 }
-  $h = $h * 6
-  $sector = [int][math]::Floor($h)
-  $f = $h - $sector
-  $q = 1 - $f
-  $t = $f
-  switch ($sector) {
-    0 { $r = 1; $g = $t; $b = 0 }
-    1 { $r = $q; $g = 1; $b = 0 }
-    2 { $r = 0; $g = 1; $b = $t }
-    3 { $r = 0; $g = $q; $b = 1 }
-    4 { $r = $t; $g = 0; $b = 1 }
-    default { $r = 1; $g = 0; $b = $q }
-  }
-  return [System.Drawing.Color]::FromArgb([int]($r * 255), [int]($g * 255), [int]($b * 255))
-}
-
-function New-RainbowBlend([double]$offset) {
-  $colors = New-Object System.Collections.Generic.List[System.Drawing.Color]
-  $positions = New-Object System.Collections.Generic.List[System.Single]
-  for ($i = 0; $i -le 6; $i++) {
-    $pos = $i / 6
-    $colors.Add((New-ColorFromHue ($pos + $offset)))
-    $positions.Add([single]$pos)
-  }
-  $blend = New-Object System.Drawing.Drawing2D.ColorBlend
-  $blend.Colors = $colors.ToArray()
-  $blend.Positions = $positions.ToArray()
-  return $blend
-}
-
-$script:ProgressMax = [Math]::Max(1, $total)
-$script:ProgressPercent = 0
-$script:HueOffset = 0
-
-$progressPanel = New-Object System.Windows.Forms.Panel
-$progressPanel.Height = 22
-$progressPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$progressPanel.BackColor = $uiPanelBg
-$progressPanel.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
-
-$progressPanel.Add_Paint({
-  param($panel, $e)
-  $g = $e.Graphics
-  $rect = $panel.ClientRectangle
-  $bgBrush = New-Object System.Drawing.SolidBrush($uiPanelBg)
-  $g.FillRectangle($bgBrush, $rect)
-  $bgBrush.Dispose()
-
-  $w = [int]($rect.Width * ($script:ProgressPercent / 100))
-  if ($w -gt 0) {
-    $blend = New-RainbowBlend $script:HueOffset
-    $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-      (New-Object System.Drawing.Point(0, 0)),
-      (New-Object System.Drawing.Point([Math]::Max(1, $w), 0)),
-      [System.Drawing.Color]::Red,
-      [System.Drawing.Color]::Red
-    )
-    $brush.InterpolationColors = $blend
-    $g.FillRectangle($brush, 0, 0, $w, $rect.Height)
-    $brush.Dispose()
-  }
-
-  $pct = "{0}%" -f [int]$script:ProgressPercent
-  $textSize = $g.MeasureString($pct, $form.Font)
-  $tx = ($rect.Width - $textSize.Width) / 2
-  $ty = ($rect.Height - $textSize.Height) / 2
-  $textBrush = New-Object System.Drawing.SolidBrush($uiFg)
-  $g.DrawString($pct, $form.Font, $textBrush, $tx, $ty)
-  $textBrush.Dispose()
-})
-
-$logList = New-Object System.Windows.Forms.ListBox
-$logList.Dock = [System.Windows.Forms.DockStyle]::Fill
-$logList.BackColor = $uiLogBg
-$logList.ForeColor = $uiFg
-$logList.IntegralHeight = $false
-$logList.HorizontalScrollbar = $true
-$logList.DrawMode = [System.Windows.Forms.DrawMode]::OwnerDrawFixed
-$logList.ItemHeight = 18
-$script:MaxLogWidth = 0
-$logList.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
-
-function Get-LogColor([string]$level) {
-  switch -Regex ($level) {
-    '^warn' { return $uiWarn }
-    '^err' { return $uiError }
-    '^succ' { return $uiSuccess }
-    default { return $uiFg }
+$script:Ui = New-HMDUi -totalCount $total -logBuffer $script:LogBuffer -onAbort {
+  param($ui)
+  if (-not $script:Abort) {
+    $script:Abort = $true
+    Set-HMDStatus $ui "Abort requested..."
+    Add-HMDLog $ui "Abort requested by user."
   }
 }
-
-function Add-LogItem([string]$text, [string]$level = "info") {
-  $item = [pscustomobject]@{
-    Text = $text
-    Level = $level
-    Color = (Get-LogColor $level)
-  }
-  $logList.Items.Add($item) | Out-Null
-  $textWidth = [System.Windows.Forms.TextRenderer]::MeasureText($text, $logList.Font).Width
-  if ($textWidth -gt $script:MaxLogWidth) {
-    $script:MaxLogWidth = $textWidth
-    $logList.HorizontalExtent = $script:MaxLogWidth + 12
-  }
-}
-
-$logList.Add_DrawItem({
-  param($listBox, $e)
-  if ($e.Index -lt 0) { return }
-  $item = $listBox.Items[$e.Index]
-  $isSelected = ($e.State -band [System.Windows.Forms.DrawItemState]::Selected) -ne 0
-  $bgColor = if ($isSelected) { $uiSelectBg } else { $listBox.BackColor }
-  $fgColor = if ($isSelected) { [System.Drawing.Color]::White } else { $item.Color }
-  $bgBrush = New-Object System.Drawing.SolidBrush($bgColor)
-  $e.Graphics.FillRectangle($bgBrush, $e.Bounds)
-  [System.Windows.Forms.TextRenderer]::DrawText(
-    $e.Graphics,
-    $item.Text,
-    $e.Font,
-    $e.Bounds,
-    $fgColor,
-    $bgColor,
-    [System.Windows.Forms.TextFormatFlags]::Left -bor
-      [System.Windows.Forms.TextFormatFlags]::VerticalCenter -bor
-      [System.Windows.Forms.TextFormatFlags]::NoPrefix
-  )
-  $bgBrush.Dispose()
-})
-
-foreach ($entry in $script:LogBuffer) {
-  if ($entry -is [string]) {
-    Add-LogItem $entry "info"
-  } else {
-    Add-LogItem $entry.Text $entry.Level
-  }
-}
-if ($logList.Items.Count -gt 0) {
-  $logList.TopIndex = $logList.Items.Count - 1
-}
-$script:LogBuffer.Clear()
-
-$abortButton = New-Object System.Windows.Forms.Button
-$abortButton.Text = "Abort Install"
-$abortButton.Size = New-Object System.Drawing.Size(110, 24)
-$abortButton.BackColor = $uiButtonBg
-$abortButton.ForeColor = $uiFg
-$abortButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$abortButton.FlatAppearance.BorderColor = $uiButtonBorder
-$abortButton.FlatAppearance.BorderSize = 1
-$abortButton.Add_Click({
-  $script:Abort = $true
-  $statusLabel.Text = "Abort requested..."
-  Add-Log "Abort requested by user."
-})
-
-$buttonPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$buttonPanel.FlowDirection = [System.Windows.Forms.FlowDirection]::RightToLeft
-$buttonPanel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$buttonPanel.WrapContents = $false
-$buttonPanel.AutoSize = $true
-$buttonPanel.AutoSizeMode = [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
-$buttonPanel.Margin = New-Object System.Windows.Forms.Padding(0)
-$buttonPanel.BackColor = $uiBg
-$buttonPanel.Controls.Add($abortButton)
-
-$form.Add_FormClosing({ $script:Abort = $true })
-
-$layout.Controls.Add($statusLabel, 0, 0) | Out-Null
-$layout.Controls.Add($progressPanel, 0, 1) | Out-Null
-$layout.Controls.Add($logList, 0, 2) | Out-Null
-$layout.Controls.Add($buttonPanel, 0, 3) | Out-Null
-$form.Controls.Add($layout)
-
-$animTimer = New-Object System.Windows.Forms.Timer
-$animTimer.Interval = 40
-$animTimer.Add_Tick({
-  $script:HueOffset += 0.01
-  if ($script:HueOffset -ge 1) { $script:HueOffset = 0 }
-  $progressPanel.Invalidate()
-})
-$animTimer.Start()
+$script:MainForm = $script:Ui.Form
 
 function Add-Log([string]$text, [string]$level = "info") {
-  $stamp = (Get-Date).ToString("HH:mm:ss")
-  $line = "$stamp $text"
-  Add-LogItem $line $level
-  $logList.TopIndex = $logList.Items.Count - 1
-  [System.Windows.Forms.Application]::DoEvents()
+  Add-HMDLog $script:Ui $text $level
 }
 
 function Set-Status([string]$text) {
-  $statusLabel.Text = $text
-  [System.Windows.Forms.Application]::DoEvents()
+  Set-HMDStatus $script:Ui $text
 }
 
 function Set-Progress([int]$value) {
-  if ($value -lt 0) { $value = 0 }
-  if ($value -gt $script:ProgressMax) { $value = $script:ProgressMax }
-  $script:ProgressPercent = [Math]::Min(100, [Math]::Max(0, [Math]::Round(($value / $script:ProgressMax) * 100)))
-  $progressPanel.Invalidate()
-  [System.Windows.Forms.Application]::DoEvents()
+  Set-HMDProgress $script:Ui $value
 }
 
 function Get-UrlsToDownload([string[]]$inputUrls, [ref]$completedRef) {
@@ -590,7 +354,7 @@ function Invoke-HMDDownloadResults([object[]]$results) {
   return ,$failed
 }
 
-$form.Add_Shown({
+$script:Ui.Form.Add_Shown({
   if ($total -eq 0) {
     if ($script:LinksFileMissing) {
       Set-Status "Missing modDownloadLinks.txt."
@@ -674,7 +438,7 @@ $form.Add_Shown({
       if ($retryUrls.Count -gt 0) {
         Add-Log ("Retrying failed downloads using latest links: {0}" -f $retryUrls.Count) "warn"
         Set-Status ("Retrying {0} downloads..." -f $retryUrls.Count)
-        $script:ProgressMax = [Math]::Max(1, $script:ProgressMax + $retryUrls.Count)
+        $script:Ui.ProgressMax = [Math]::Max(1, $script:Ui.ProgressMax + $retryUrls.Count)
         Set-Progress $completed
 
         $retryUrlsToDownload = Get-UrlsToDownload $retryUrls ([ref]$completed)
@@ -718,5 +482,5 @@ $form.Add_Shown({
   Write-Host "`nDone."
 })
 
-[System.Windows.Forms.Application]::Run($form)
+[System.Windows.Forms.Application]::Run($script:Ui.Form)
 

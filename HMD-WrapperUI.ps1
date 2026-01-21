@@ -19,13 +19,6 @@ if ([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA') {
   exit
 }
 
-$DownloadDir = Join-Path $env:USERPROFILE "Downloads"
-
-$PollMs      = 50
-$TimeoutSec  = 180
-$MinStableAgeMs = 1000
-$NoFileTimeoutSec = 10
-
 try {
   Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
   Add-Type -AssemblyName System.Drawing -ErrorAction Stop
@@ -45,6 +38,14 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot "HMD-SaveHandler.ps1")
 . (Join-Path $PSScriptRoot "HMD-Ui.ps1")
 . (Join-Path $PSScriptRoot "HMD-DownloadOrchestrator.ps1")
+. (Join-Path $PSScriptRoot "HMD-Config.ps1")
+
+$script:Config = Get-HMDDefaults
+$DownloadDir = $script:Config.DownloadDir
+$PollMs      = $script:Config.PollMs
+$TimeoutSec  = $script:Config.TimeoutSec
+$MinStableAgeMs = $script:Config.MinStableAgeMs
+$NoFileTimeoutSec = $script:Config.NoFileTimeoutSec
 
 $script:Abort = $false
 $script:LogBuffer = New-Object System.Collections.Generic.List[object]
@@ -63,27 +64,33 @@ $UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
 Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
 
-$LinksFile   = Join-Path $PSScriptRoot "modDownloadLinks.txt"
-$DestDir     = Join-Path $UserDataDir "Mods"
+$LinksFile   = Join-Path $PSScriptRoot $script:Config.LinksFileName
+$DestDir     = Join-Path $UserDataDir $script:Config.ModsDirName
 $InstallIndexFile = Join-Path $UserDataDir "modInstallIndex.json"
 Add-LogBuffer ("Links file: {0}" -f $LinksFile)
 Add-LogBuffer ("Mods folder: {0}" -f $DestDir)
 Add-LogBuffer ("Install index: {0}" -f $InstallIndexFile)
+Add-LogBuffer ("Downloads folder: {0}" -f $DownloadDir)
 
 $script:LinksFileMissing = $false
 if (!(Test-Path $LinksFile)) {
   $script:LinksFileMissing = $true
   Add-LogBuffer ("Missing links file: {0}" -f $LinksFile) "error"
 }
+$script:DownloadsDirMissing = $false
+if (!(Test-Path -LiteralPath $DownloadDir)) {
+  $script:DownloadsDirMissing = $true
+  Add-LogBuffer ("Downloads folder not found: {0}" -f $DownloadDir) "error"
+}
 New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
 Add-LogBuffer ("Ensured Mods folder exists: {0}" -f $DestDir)
 
 $script:InstallIndex = Get-HMDIndex $InstallIndexFile
-Add-LogBuffer ("Loaded install entries: {0}" -f $script:InstallIndex.mods.Count)
+Add-LogBuffer ("Loaded install entries: {0}" -f @($script:InstallIndex.mods).Count)
 
 $SavesDir = Join-Path $UserDataDir "Saves"
-$SaveName = "AMMAP"
-$ConfigSource = Join-Path $PSScriptRoot "AMMAP_CONFIG"
+$SaveName = $script:Config.SaveName
+$ConfigSource = Join-Path $PSScriptRoot $script:Config.ConfigDirName
 
 $script:BrowserState = Get-HMDBrowserState
 $script:BrowserInfo = $script:BrowserState.Info
@@ -115,8 +122,8 @@ $urls = if ($script:LinksFileMissing) {
     Where-Object { $_ -and -not $_.StartsWith("#") }
 }
 
-$total = $urls.Count
-$script:Ui = New-HMDUi -totalCount $total -logBuffer $script:LogBuffer -onAbort {
+$total = @($urls).Count
+$script:Ui = New-HMDUi -totalCount $total -logBuffer $script:LogBuffer -title $script:Config.UiTitle -onAbort {
   param($ui)
   if (-not $script:Abort) {
     $script:Abort = $true
@@ -139,13 +146,18 @@ function Set-Progress([int]$value) {
 }
 
 $script:Ui.Form.Add_Shown({
+  if ($script:DownloadsDirMissing) {
+    Set-Status "Downloads folder not found."
+    Add-Log ("Downloads folder not found: {0}" -f $DownloadDir) "error"
+    return
+  }
   if ($total -eq 0) {
     if ($script:LinksFileMissing) {
-      Set-Status "Missing modDownloadLinks.txt."
-      Add-Log "Missing modDownloadLinks.txt." "error"
+      Set-Status ("Missing {0}." -f $script:Config.LinksFileName)
+      Add-Log ("Missing {0}." -f $script:Config.LinksFileName) "error"
     } else {
-      Set-Status "No URLs found in modDownloadLinks.txt."
-      Add-Log "No URLs found in modDownloadLinks.txt."
+      Set-Status ("No URLs found in {0}." -f $script:Config.LinksFileName)
+      Add-Log ("No URLs found in {0}." -f $script:Config.LinksFileName)
     }
     return
   }

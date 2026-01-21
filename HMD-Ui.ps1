@@ -86,7 +86,8 @@ function New-HMDUi {
   param(
     [int]$totalCount,
     [System.Collections.Generic.List[object]]$logBuffer,
-    [scriptblock]$onAbort
+    [scriptblock]$onAbort,
+    [string]$title = "AMMAP Installer"
   )
 
   $colors = [pscustomobject]@{
@@ -111,7 +112,7 @@ function New-HMDUi {
   }
 
   $form = New-Object System.Windows.Forms.Form
-  $form.Text = "AMMAP Installer"
+  $form.Text = $title
   $form.FormBorderStyle = "SizableToolWindow"
   $form.StartPosition = "Manual"
   $form.Size = New-Object System.Drawing.Size(520, 340)

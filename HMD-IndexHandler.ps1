@@ -100,3 +100,79 @@ function Get-HMDFileHash([string]$path) {
     return $null
   }
 }
+
+function Get-HMDManifestFieldValue([string]$text, [string]$key) {
+  $k = [regex]::Escape($key)
+  $patterns = @(
+    '"{0}"\s*:\s*"([^"]*)"' -f $k
+  )
+  foreach ($pattern in $patterns) {
+    $m = [regex]::Match($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    if ($m.Success) {
+      return $m.Groups[1].Value.Trim()
+    }
+  }
+  return $null
+}
+
+function Get-HMDModManifestInfo {
+  param(
+    [string]$filePath,
+    [scriptblock]$onLog
+  )
+
+  try {
+    $zip = [IO.Compression.ZipFile]::OpenRead($filePath)
+  } catch {
+    if ($onLog) { & $onLog ("Not a zip or cannot open: {0}" -f $filePath) "warn" }
+    return $null
+  }
+
+  $entry = $null
+  $reader = $null
+  try {
+    $entry = $zip.Entries | Where-Object { $_.FullName -match '(^|/|\\)manifest\.json$' } | Select-Object -First 1
+    if (-not $entry) {
+      if ($onLog) { & $onLog "manifest.json not found in mod file." "warn" }
+      return $null
+    }
+    $reader = New-Object IO.StreamReader($entry.Open())
+    $jsonText = $reader.ReadToEnd()
+    $main = $null
+    $version = $null
+    try {
+      $manifest = $jsonText | ConvertFrom-Json -ErrorAction Stop
+      if ($manifest.PSObject.Properties.Match('Main').Count -gt 0) {
+        $main = [string]$manifest.Main
+      }
+      if ($manifest.PSObject.Properties.Match('Version').Count -gt 0) {
+        $version = [string]$manifest.Version
+      }
+    } catch {
+      # Fall back to regex parsing below.
+    }
+
+    if (-not $main) {
+      $main = Get-HMDManifestFieldValue $jsonText "Main"
+      if ($main -and $onLog) { & $onLog "Manifest field used: Main" "info" }
+    }
+    if (-not $main) {
+      $main = Get-HMDManifestFieldValue $jsonText "Name"
+      if ($main -and $onLog) { & $onLog "Manifest field used: Name (fallback)" "info" }
+    }
+    if (-not $version) {
+      $version = Get-HMDManifestFieldValue $jsonText "Version"
+    }
+
+    return @{
+      Name = $main
+      Version = $version
+    }
+  } catch {
+    if ($onLog) { & $onLog ("Failed to read manifest.json: {0}" -f $_.Exception.Message) "warn" }
+    return $null
+  } finally {
+    if ($reader) { $reader.Dispose() }
+    $zip.Dispose()
+  }
+}

@@ -69,77 +69,6 @@ function Get-LatestCurseForgeUrl([string]$url) {
   return ("https://www.curseforge.com/{0}/mods/{1}/download/" -f $m.Groups[1].Value, $m.Groups[2].Value)
 }
 
-function Get-ManifestFieldValue([string]$text, [string]$key) {
-  $k = [regex]::Escape($key)
-  $patterns = @(
-    '"{0}"\s*:\s*"([^"]*)"' -f $k
-  )
-  foreach ($pattern in $patterns) {
-    $m = [regex]::Match($text, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    if ($m.Success) {
-      return $m.Groups[1].Value.Trim()
-    }
-  }
-  return $null
-}
-
-function Get-ModManifestInfo([string]$filePath) {
-  try {
-    $zip = [IO.Compression.ZipFile]::OpenRead($filePath)
-  } catch {
-    Add-Log ("Not a zip or cannot open: {0}" -f $filePath) "warn"
-    return $null
-  }
-
-  $entry = $null
-  $reader = $null
-  try {
-    $entry = $zip.Entries | Where-Object { $_.FullName -match '(^|/|\\)manifest\.json$' } | Select-Object -First 1
-    if (-not $entry) {
-      Add-Log "manifest.json not found in mod file." "warn"
-      return $null
-    }
-    $reader = New-Object IO.StreamReader($entry.Open())
-    $jsonText = $reader.ReadToEnd()
-    $main = $null
-    $version = $null
-    try {
-      $manifest = $jsonText | ConvertFrom-Json -ErrorAction Stop
-      if ($manifest.PSObject.Properties.Match('Main').Count -gt 0) {
-        $main = [string]$manifest.Main
-      }
-      if ($manifest.PSObject.Properties.Match('Version').Count -gt 0) {
-        $version = [string]$manifest.Version
-      }
-    } catch {
-      # Fall back to regex parsing below.
-    }
-
-    if (-not $main) {
-      $main = Get-ManifestFieldValue $jsonText "Main"
-      if ($main) { Add-Log "Manifest field used: Main" }
-    }
-    if (-not $main) {
-      $main = Get-ManifestFieldValue $jsonText "Name"
-      if ($main) { Add-Log "Manifest field used: Name (fallback)" }
-    }
-    if (-not $version) {
-      $version = Get-ManifestFieldValue $jsonText "Version"
-    }
-
-    return @{
-      Name = $main
-      Version = $version
-    }
-  } catch {
-    Add-Log ("Failed to read manifest.json: {0}" -f $_.Exception.Message) "warn"
-    return $null
-  } finally {
-    if ($reader) { $reader.Dispose() }
-    $zip.Dispose()
-  }
-}
-
 $UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg $level }
 if (-not $UserDataDir) { throw "Hytale install location not provided." }
 Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
@@ -302,7 +231,7 @@ function Invoke-HMDDownloadResults([object[]]$results) {
 
     $dest = $result.destPath
     Add-Log ("Reading manifest: {0}" -f $dest)
-    $manifestInfo = Get-ModManifestInfo $dest
+    $manifestInfo = Get-HMDModManifestInfo -filePath $dest -onLog ${function:Add-Log}
     $modName = $null
     $modVersion = $null
     if ($manifestInfo) {

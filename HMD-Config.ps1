@@ -5,9 +5,9 @@ Set-StrictMode -Version Latest
 
 function Get-HMDDefaults {
   return [pscustomobject]@{
-    UiTitle = "AMMAP Installer"
+    UiTitle = "HMD Installer"
     SaveName = "AMMAP"
-    ConfigDirName = "AMMAP_CONFIG"
+    ConfigDirName = "CONFIGS"
     ModsDirName = "Mods"
     LinksFileName = "modDownloadLinks.txt"
     DownloadDir = (Join-Path $env:USERPROFILE "Downloads")

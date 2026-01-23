@@ -60,13 +60,63 @@ function Add-LogBuffer([string]$text, [string]$level = "info") {
 
 Add-LogBuffer "Script started."
 
-$UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg $level }
-if (-not $UserDataDir) { throw "Hytale install location not provided." }
-Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
+function Select-HMDInstallMode {
+  $msg = "Install type?`n`nYes = Client`nNo = Server`nCancel = Exit"
+  $choice = [System.Windows.Forms.MessageBox]::Show(
+    $msg,
+    "HMD Install Type",
+    [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+    [System.Windows.Forms.MessageBoxIcon]::Question
+  )
+  switch ($choice) {
+    ([System.Windows.Forms.DialogResult]::Yes) { return "Client" }
+    ([System.Windows.Forms.DialogResult]::No) { return "Server" }
+    default { return $null }
+  }
+}
 
-$LinksFile   = Join-Path $PSScriptRoot $script:Config.LinksFileName
-$DestDir     = Join-Path $UserDataDir $script:Config.ModsDirName
-$InstallIndexFile = Join-Path $UserDataDir "modInstallIndex.json"
+function Select-HMDInstallRoot([string]$description) {
+  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dialog.Description = $description
+  $dialog.ShowNewFolderButton = $false
+  $result = $dialog.ShowDialog()
+  if ($result -ne [System.Windows.Forms.DialogResult]::OK -or
+      [string]::IsNullOrWhiteSpace($dialog.SelectedPath)) {
+    return $null
+  }
+  return $dialog.SelectedPath
+}
+
+$installMode = Select-HMDInstallMode
+if (-not $installMode) {
+  Add-LogBuffer "Install cancelled by user." "warn"
+  Write-Host "Install cancelled."
+  exit
+}
+Add-LogBuffer ("Install mode: {0}" -f $installMode)
+$script:IsServerInstall = $installMode -eq "Server"
+
+$LinksFile = Join-Path $PSScriptRoot $script:Config.LinksFileName
+$InstallIndexFile = $null
+$DestDir = $null
+$UserDataDir = $null
+if ($script:IsServerInstall) {
+  $serverRoot = Select-HMDInstallRoot "Select your Hytale server root folder"
+  if (-not $serverRoot) {
+    Add-LogBuffer "Server install location not provided." "error"
+    Write-Host "Server install location not provided."
+    exit
+  }
+  Add-LogBuffer ("Using server root: {0}" -f $serverRoot)
+  $DestDir = Join-Path $serverRoot "mods"
+  $InstallIndexFile = Join-Path $serverRoot "modInstallIndex.json"
+} else {
+  $UserDataDir = Get-HMDHytaleUserDataDir { param($msg, $level) Add-LogBuffer $msg $level }
+  if (-not $UserDataDir) { throw "Hytale install location not provided." }
+  Add-LogBuffer ("Using UserData folder: {0}" -f $UserDataDir)
+  $DestDir = Join-Path $UserDataDir $script:Config.ModsDirName
+  $InstallIndexFile = Join-Path $UserDataDir "modInstallIndex.json"
+}
 Add-LogBuffer ("Links file: {0}" -f $LinksFile)
 Add-LogBuffer ("Mods folder: {0}" -f $DestDir)
 Add-LogBuffer ("Install index: {0}" -f $InstallIndexFile)
@@ -88,7 +138,7 @@ Add-LogBuffer ("Ensured Mods folder exists: {0}" -f $DestDir)
 $script:InstallIndex = Get-HMDIndex $InstallIndexFile
 Add-LogBuffer ("Loaded install entries: {0}" -f @($script:InstallIndex.mods).Count)
 
-$SavesDir = Join-Path $UserDataDir "Saves"
+$SavesDir = if ($UserDataDir) { Join-Path $UserDataDir "Saves" } else { $null }
 $SaveName = $script:Config.SaveName
 $ConfigSource = Join-Path $PSScriptRoot $script:Config.ConfigDirName
 
@@ -289,8 +339,16 @@ $script:Ui.Form.Add_Shown({
     Add-Log "Closing Firefox download window..."
     Stop-HMDFirefoxWindow
   }
-  Add-Log "Updating AMMAP save..."
-  Set-HMDSave -savesDir $SavesDir -saveName $SaveName -configSource $ConfigSource -owner $script:MainForm -onLog ${function:Add-Log}
+  if ($script:IsServerInstall) {
+    $serverConfigSource = Join-Path $ConfigSource "mods"
+    Add-Log ("Copying server mod configs from: {0}" -f $serverConfigSource)
+    if (Copy-HMDConfigToSave $serverConfigSource $DestDir ${function:Add-Log}) {
+      Add-Log "Merged server mod configs into mods folder." "success"
+    }
+  } else {
+    Add-Log "Updating AMMAP save..."
+    Set-HMDSave -savesDir $SavesDir -saveName $SaveName -configSource $ConfigSource -owner $script:MainForm -onLog ${function:Add-Log}
+  }
   Write-Host "`nDone."
 })
 
